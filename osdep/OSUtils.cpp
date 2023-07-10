@@ -17,6 +17,7 @@
 #include <stdarg.h>
 #include <sys/stat.h>
 #include <stdlib.h>
+#include <inttypes.h>
 
 #include "../node/Constants.hpp"
 #include "../node/Utils.hpp"
@@ -36,12 +37,16 @@
 #ifdef __WINDOWS__
 #include <windows.h>
 #include <wincrypt.h>
-#include <ShlObj.h>
+#include <shlobj.h>
 #include <netioapi.h>
 #include <iphlpapi.h>
 #endif
 
 #include "OSUtils.hpp"
+
+#ifdef __GCC__
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
 
 namespace ZeroTier {
 
@@ -60,6 +65,18 @@ unsigned int OSUtils::ztsnprintf(char *buf,unsigned int len,const char *fmt,...)
 	}
 
 	return (unsigned int)n;
+}
+
+std::string OSUtils::networkIDStr(const uint64_t nwid) {
+	char tmp[32] = {};
+	ztsnprintf(tmp, sizeof(tmp), "%.16" PRIx64, nwid);
+	return std::string(tmp);
+}
+
+std::string OSUtils::nodeIDStr(const uint64_t nid) {
+	char tmp[32] = {};
+	ztsnprintf(tmp, sizeof(tmp), "%.10" PRIx64, nid);
+	return std::string(tmp);
 }
 
 #ifdef __UNIX_LIKE__
@@ -250,6 +267,16 @@ void OSUtils::lockDownFile(const char *path,bool isDir)
 		memset(&processInfo,0,sizeof(PROCESS_INFORMATION));
 		if (CreateProcessA(NULL,(LPSTR)(std::string("C:\\Windows\\System32\\icacls.exe \"") + path + "\" /remove *S-1-5-32-545 /Q").c_str(),NULL,NULL,FALSE,CREATE_NO_WINDOW,NULL,NULL,&startupInfo,&processInfo)) {
 			WaitForSingleObject(processInfo.hProcess,INFINITE);
+			CloseHandle(processInfo.hProcess);
+			CloseHandle(processInfo.hThread);
+		}
+
+		// Remove 'Everyone' group from R/RX access
+		startupInfo.cb = sizeof(startupInfo);
+		memset(&startupInfo, 0, sizeof(STARTUPINFOA));
+		memset(&processInfo, 0, sizeof(PROCESS_INFORMATION));
+		if (CreateProcessA(NULL, (LPSTR)(std::string("C:\\Windows\\System32\\icacls.exe \"") + path + "\" /remove:g Everyone /t /c /Q").c_str(), NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &startupInfo, &processInfo)) {
+			WaitForSingleObject(processInfo.hProcess, INFINITE);
 			CloseHandle(processInfo.hProcess);
 			CloseHandle(processInfo.hThread);
 		}

@@ -28,9 +28,9 @@
 #include "../node/InetAddress.hpp"
 
 #ifdef __WINDOWS__
-#include <WinSock2.h>
-#include <Windows.h>
-#include <Shlwapi.h>
+#include <winsock2.h>
+#include <windows.h>
+#include <shlwapi.h>
 #else
 #include <unistd.h>
 #include <errno.h>
@@ -43,7 +43,7 @@
 #endif
 
 #ifndef OMIT_JSON_SUPPORT
-#include "../ext/json/json.hpp"
+#include <nlohmann/json.hpp>
 #endif
 
 namespace ZeroTier {
@@ -67,6 +67,22 @@ public:
 	 * @throws std::length_error buf[] too short (buf[] will still be left null-terminated)
 	 */
 	static unsigned int ztsnprintf(char *buf,unsigned int len,const char *fmt,...);
+
+	/**
+	 * Converts a uint64_t network ID into a string
+	 * 
+	 * @param nwid network ID
+	 * @throws std::length_error buf[] too short (buf[] will still be left null-terminated)
+	 */
+	static std::string networkIDStr(const uint64_t nwid);
+
+	/**
+	 * Converts a uint64_t node ID into a string
+	 * 
+	 * @param nid node ID
+	 * @throws std::length_error buf[] too short (buf[] will still be left null-terminated)
+	 */
+	static std::string nodeIDStr(const uint64_t nid);
 
 #ifdef __UNIX_LIKE__
 	/**
@@ -194,20 +210,6 @@ public:
 	 * @return IP addresses in InetAddress sort order or empty vector if not found
 	 */
 	static std::vector<InetAddress> resolve(const char *name);
-
-	/**
-	 * @return Current time in a human-readable format
-	 */
-	static inline std::string humanReadableTimestamp()
-	{
-		time_t rawtime;
-		struct tm * timeinfo;
-		char buffer [80];
-		time (&rawtime);
-		timeinfo = localtime (&rawtime);
-		strftime (buffer,80,"%F %T",timeinfo);
-		return std::string(buffer);
-	}
 
 	/**
 	 * @return Current time in milliseconds since epoch

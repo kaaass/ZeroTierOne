@@ -273,9 +273,6 @@
     <ClCompile Include="..\..\node\Bond.cpp">
       <Filter>Source Files\node</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\node\BondController.cpp">
-      <Filter>Source Files\node</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\osdep\WinDNSHelper.cpp">
       <Filter>Source Files\osdep</Filter>
     </ClCompile>
@@ -289,6 +286,12 @@
       <Filter>Source Files\node</Filter>
     </ClCompile>
     <ClCompile Include="..\..\node\AES_armcrypto.cpp">
+      <Filter>Source Files\node</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\osdep\WinFWHelper.cpp">
+      <Filter>Source Files\osdep</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\node\Metrics.cpp">
       <Filter>Source Files\node</Filter>
     </ClCompile>
   </ItemGroup>
@@ -553,6 +556,12 @@
     </ClInclude>
     <ClInclude Include="..\..\osdep\WinDNSHelper.hpp">
       <Filter>Header Files\osdep</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\osdep\WinFWHelper.hpp">
+      <Filter>Header Files\osdep</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\node\Metrics.hpp">
+      <Filter>Header Files\node</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

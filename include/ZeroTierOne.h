@@ -23,9 +23,9 @@
 
 // For the struct sockaddr_storage structure
 #if defined(_WIN32) || defined(_WIN64)
-#include <WinSock2.h>
-#include <WS2tcpip.h>
-#include <Windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
 #else /* not Windows */
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -87,6 +87,11 @@ extern "C" {
 #define ZT_MIN_PHYSMTU 1400
 
 /**
+ * Maximum physical interface name length. This number is gigantic because of Windows.
+ */
+#define ZT_MAX_PHYSIFNAME 256
+
+/**
  * Default UDP payload size (physical path MTU) not including UDP and IP overhead
  *
  * This is small enough for PPPoE and for Google Cloud's bizarrely tiny MTUs.
@@ -123,12 +128,12 @@ extern "C" {
 /**
  * Maximum number of pushed routes on a network
  */
-#define ZT_MAX_NETWORK_ROUTES 32
+#define ZT_MAX_NETWORK_ROUTES 128
 
 /**
  * Maximum number of statically assigned IP addresses per network endpoint using ZT address management (not DHCP)
  */
-#define ZT_MAX_ZT_ASSIGNED_ADDRESSES 16
+#define ZT_MAX_ZT_ASSIGNED_ADDRESSES 32
 
 /**
  * Maximum number of "specialists" on a network -- bridges, relays, etc.
@@ -163,7 +168,7 @@ extern "C" {
 /**
  * Maximum number of direct network paths to a given peer
  */
-#define ZT_MAX_PEER_NETWORK_PATHS 16
+#define ZT_MAX_PEER_NETWORK_PATHS 64
 
 /**
  * Maximum number of path configurations that can be set
@@ -379,7 +384,7 @@ enum ZT_ResultCode
 	 */
 	ZT_RESULT_OK_IGNORED = 1,
 
-	// Fatal errors (>100, <1000)
+	// Fatal errors (>=100, <1000)
 
 	/**
 	 * Ran out of memory
@@ -419,157 +424,6 @@ enum ZT_ResultCode
  * @return True if result code indicates a fatal error
  */
 #define ZT_ResultCode_isFatal(x) ((((int)(x)) >= 100)&&(((int)(x)) < 1000))
-
-
-/**
- *  Multipath bonding policy
- */
-enum ZT_MultipathBondingPolicy
-{
-	/**
-	 * Normal operation. No fault tolerance, no load balancing
-	 */
-	ZT_BONDING_POLICY_NONE = 0,
-
-	/**
-	 * Sends traffic out on only one path at a time. Configurable immediate
-	 * fail-over.
-	 */
-	ZT_BONDING_POLICY_ACTIVE_BACKUP = 1,
-
-	/**
-	 * Sends traffic out on all paths
-	 */
-	ZT_BONDING_POLICY_BROADCAST = 2,
-
-	/**
-	 * Stripes packets across all paths
-	 */
-	ZT_BONDING_POLICY_BALANCE_RR = 3,
-
-	/**
-	 * Packets destined for specific peers will always be sent over the same
-	 * path.
-	 */
-	ZT_BONDING_POLICY_BALANCE_XOR = 4,
-
-	/**
-	 * Balances flows among all paths according to path performance
-	 */
-	ZT_BONDING_POLICY_BALANCE_AWARE = 5
-};
-
-/**
- * Multipath active re-selection policy (linkSelectMethod)
- */
-enum ZT_MultipathLinkSelectMethod
-{
-	/**
-	 * Primary link regains status as active link whenever it comes back up
-	 * (default when links are explicitly specified)
-	 */
-	ZT_MULTIPATH_RESELECTION_POLICY_ALWAYS = 0,
-
-	/**
-	 * Primary link regains status as active link when it comes back up and
-	 * (if) it is better than the currently-active link.
-	 */
-	ZT_MULTIPATH_RESELECTION_POLICY_BETTER = 1,
-
-	/**
-	 * Primary link regains status as active link only if the currently-active
-	 * link fails.
-	 */
-	ZT_MULTIPATH_RESELECTION_POLICY_FAILURE = 2,
-
-	/**
-	 * The primary link can change if a superior path is detected.
-	 * (default if user provides no fail-over guidance)
-	 */
-	ZT_MULTIPATH_RESELECTION_POLICY_OPTIMIZE = 3
-};
-
-/**
- * Mode of multipath link interface
- */
-enum ZT_MultipathLinkMode
-{
-	ZT_MULTIPATH_SLAVE_MODE_PRIMARY = 0,
-	ZT_MULTIPATH_SLAVE_MODE_SPARE = 1
-};
-
-/**
- * Strategy for path monitoring
- */
-enum ZT_MultipathMonitorStrategy
-{
-	/**
-	 * Use bonding policy's default strategy
-	 */
-	ZT_MULTIPATH_SLAVE_MONITOR_STRATEGY_DEFAULT = 0,
-
-	/**
-	 * Does not actively send probes to judge aliveness, will rely
-	 * on conventional traffic and summary statistics.
-	 */
-	ZT_MULTIPATH_SLAVE_MONITOR_STRATEGY_PASSIVE = 1,
-
-	/**
-	 * Sends probes at a constant rate to judge aliveness.
-	 */
-	ZT_MULTIPATH_SLAVE_MONITOR_STRATEGY_ACTIVE = 2,
-
-	/**
-	 * Sends probes at varying rates which correlate to native
-	 * traffic loads to judge aliveness.
-	 */
-	ZT_MULTIPATH_SLAVE_MONITOR_STRATEGY_DYNAMIC = 3
-};
-
-/**
- * Strategy for re-balancing protocol flows
- */
-enum ZT_MultipathFlowRebalanceStrategy
-{
-	/**
-	 * Flows will only be re-balanced among links during
-	 * assignment or failover. This minimizes the possibility
-	 * of sequence reordering and is thus the default setting.
-	 */
-	ZT_MULTIPATH_FLOW_REBALANCE_STRATEGY_PASSIVE = 0,
-
-	/**
-	 * Flows that are active may be re-assigned to a new more
-	 * suitable link if it can be done without disrupting the flow.
-	 * This setting can sometimes cause sequence re-ordering.
-	 */
-	ZT_MULTIPATH_FLOW_REBALANCE_STRATEGY_OPPORTUNISTIC = 0,
-
-	/**
-	 * Flows will be continuously re-assigned the most suitable link
-	 * in order to maximize "balance". This can often cause sequence
-	 * reordering and is thus only reccomended for protocols like UDP.
-	 */
-	ZT_MULTIPATH_FLOW_REBALANCE_STRATEGY_AGGRESSIVE = 2
-};
-
-/**
- * Indices for the path quality weight vector
- */
-enum ZT_MultipathQualityWeightIndex
-{
-	ZT_QOS_LAT_IDX,
-	ZT_QOS_LTM_IDX,
-	ZT_QOS_PDV_IDX,
-	ZT_QOS_PLR_IDX,
-	ZT_QOS_PER_IDX,
-	ZT_QOS_THR_IDX,
-	ZT_QOS_THM_IDX,
-	ZT_QOS_THV_IDX,
-	ZT_QOS_AGE_IDX,
-	ZT_QOS_SCP_IDX,
-	ZT_QOS_WEIGHT_SIZE
-};
 
 /**
  * Status codes sent to status update callback when things happen
@@ -820,7 +674,12 @@ enum ZT_VirtualNetworkStatus
 	/**
 	 * ZeroTier core version too old
 	 */
-	ZT_NETWORK_STATUS_CLIENT_TOO_OLD = 5
+	ZT_NETWORK_STATUS_CLIENT_TOO_OLD = 5,
+
+	/**
+	 * External authentication is required (e.g. SSO)
+	 */
+	ZT_NETWORK_STATUS_AUTHENTICATION_REQUIRED = 6
 };
 
 /**
@@ -1225,7 +1084,8 @@ enum ZT_Architecture
 	ZT_ARCHITECTURE_DOTNET_CLR = 13,
 	ZT_ARCHITECTURE_JAVA_JVM = 14,
 	ZT_ARCHITECTURE_WEB = 15,
-	ZT_ARCHITECTURE_S390X = 16
+	ZT_ARCHITECTURE_S390X = 16,
+	ZT_ARCHITECTURE_LOONGARCH64 = 17
 };
 
 /**
@@ -1339,6 +1199,58 @@ typedef struct
 	 * Network specific DNS configuration
 	 */
 	ZT_VirtualNetworkDNS dns;
+
+
+
+	/**
+	 * sso enabled
+	 */
+	bool ssoEnabled;
+
+	/**
+	 * SSO version
+	 */
+	uint64_t ssoVersion;
+
+	/**
+	 * If the status us AUTHENTICATION_REQUIRED, this may contain a URL for authentication.
+	 */
+	char authenticationURL[2048];
+
+	/**
+	 * Time that current authentication expires. only valid if ssoEnabled is true
+	 */
+	uint64_t authenticationExpiryTime;
+
+	/**
+	 * OIDC issuer URL.
+	 */
+	char issuerURL[2048];
+
+	/**
+	 * central base URL.
+	 */
+	char centralAuthURL[2048];
+
+	/**
+	 * sso nonce
+	 */
+	char ssoNonce[128];
+
+	/**
+	 * sso state
+	 */
+	char ssoState[256];
+
+	/**
+	 * oidc client id
+	 */
+	char ssoClientID[256];
+
+	/**
+	 * sso provider
+	 **/
+	char ssoProvider[64];
 } ZT_VirtualNetworkConfig;
 
 /**
@@ -1416,34 +1328,19 @@ typedef struct
 	float packetErrorRatio;
 
 	/**
-	 * Mean throughput
-	 */
-	uint64_t throughputMean;
-
-	/**
-	 * Maximum observed throughput
-	 */
-	float throughputMax;
-
-	/**
-	 * Throughput variance
-	 */
-	float throughputVariance;
-
-	/**
 	 * Address scope
 	 */
 	uint8_t scope;
 
 	/**
-	 * Percentage of traffic allocated to this path
+	 * Relative quality value
 	 */
-	float allocation;
+	float relativeQuality;
 
 	/**
-	 * Name of physical interface (for monitoring)
+	 * Name of physical interface this path resides on
 	 */
-	char ifname[32];
+	char ifname[ZT_MAX_PHYSIFNAME];
 
 	uint64_t localSocket;
 
@@ -1451,6 +1348,21 @@ typedef struct
 	 * Is path expired?
 	 */
 	int expired;
+
+	/**
+	 * Whether this path is currently included in the bond
+	 */
+	uint8_t bonded;
+
+	/**
+	 * Whether this path is currently eligible to be used in a bond
+	 */
+	uint8_t eligible;
+
+	/**
+	 * The capacity of this link (as given to bonding layer)
+	 */
+	uint32_t linkSpeed;
 
 	/**
 	 * Is path preferred?
@@ -1502,11 +1414,6 @@ typedef struct
 	 * The bonding policy used to bond to this peer
 	 */
 	int bondingPolicy;
-
-	/**
-	 * The health status of the bond to this peer
-	 */
-	bool isHealthy;
 
 	/**
 	 * The number of links that comprise the bond to this peer that are considered alive
@@ -2164,7 +2071,7 @@ ZT_SDK_API int ZT_Node_sendUserMessage(ZT_Node *node,void *tptr,uint64_t dest,ui
  * NetworkConfigMaster base class in node/. No type checking is performed,
  * so a pointer to anything else will result in a crash.
  *
- * @param node ZertTier One node
+ * @param node ZeroTier One node
  * @param networkConfigMasterInstance Instance of NetworkConfigMaster C++ class or NULL to disable
  * @return OK (0) or error code if a fatal error condition has occurred
  */

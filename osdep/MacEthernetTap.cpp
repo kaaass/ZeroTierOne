@@ -59,10 +59,13 @@
 
 static const ZeroTier::MulticastGroup _blindWildcardMulticastGroup(ZeroTier::MAC(0xff),0);
 
+#define MACOS_FETH_MAX_MTU_SYSCTL "net.link.fake.max_mtu"
+
 namespace ZeroTier {
 
 static Mutex globalTapCreateLock;
 static bool globalTapInitialized = false;
+static bool fethMaxMtuAdjusted = false;
 
 MacEthernetTap::MacEthernetTap(
 	const char *homePath,
@@ -87,7 +90,8 @@ MacEthernetTap::MacEthernetTap(
 	_agentStdout2(-1),
 	_agentStderr2(-1),
 	_agentPid(-1),
-	_enabled(true)
+	_enabled(true),
+	_lastIfAddrsUpdate(0)
 {
 	char ethaddr[64],mtustr[16],devnostr[16],devstr[16],metricstr[16];
 	OSUtils::ztsnprintf(ethaddr,sizeof(ethaddr),"%.2x:%.2x:%.2x:%.2x:%.2x:%.2x",(int)mac[0],(int)mac[1],(int)mac[2],(int)mac[3],(int)mac[4],(int)mac[5]);
@@ -101,6 +105,14 @@ MacEthernetTap::MacEthernetTap(
 		throw std::runtime_error("MacEthernetTapAgent not present in ZeroTier home");
 
 	Mutex::Lock _gl(globalTapCreateLock); // only make one at a time
+
+	if (!fethMaxMtuAdjusted) {
+		fethMaxMtuAdjusted = true;
+		int old_mtu = 0;
+		size_t old_mtu_len = sizeof(old_mtu);
+		int mtu = 10000;
+		sysctlbyname(MACOS_FETH_MAX_MTU_SYSCTL, &old_mtu, &old_mtu_len, &mtu, sizeof(mtu));
+	}
 
 	// Destroy all feth devices on first tap start in case ZeroTier did not exit cleanly last time.
 	// We leave interfaces less than feth100 alone in case something else is messing with feth devices.
@@ -198,8 +210,30 @@ MacEthernetTap::MacEthernetTap(
 		::_exit(-1);
 	} else {
 		_agentPid = apid;
+
+		// Wait up to 10 seconds for the subprocess to actually create the device. This prevents
+		// things like routes from being created before the device exists.
+		for(int waitLoops=0;;++waitLoops) {
+			struct ifaddrs *ifa = (struct ifaddrs *)0;
+			if (!getifaddrs(&ifa)) {
+				struct ifaddrs *p = ifa;
+				while (p) {
+					if ((p->ifa_name)&&(!strcmp(devstr, p->ifa_name))) {
+						waitLoops = -1;
+						break;
+					}
+					p = p->ifa_next;
+				}
+				freeifaddrs(ifa);
+			}
+			if (waitLoops == -1) {
+				break;
+			} else if (waitLoops >= 100) { // 10 seconds
+				throw std::runtime_error("feth device creation timed out");
+			}
+			Thread::sleep(100);
+		}
 	}
-	Thread::sleep(100); // this causes them to come up in a more user-friendly order on launch
 
 	_thread = Thread::start(this);
 }
@@ -211,6 +245,7 @@ MacEthernetTap::~MacEthernetTap()
 	pid_t pid0,pid1;
 
 	MacDNSHelper::removeDNS(_nwid);
+	MacDNSHelper::removeIps(_nwid);
 
 	Mutex::Lock _gl(globalTapCreateLock);
 	::write(_shutdownSignalPipe[1],"\0",1); // causes thread to exit
@@ -307,8 +342,16 @@ bool MacEthernetTap::removeIp(const InetAddress &ip)
 
 std::vector<InetAddress> MacEthernetTap::ips() const
 {
+	uint64_t now = OSUtils::now();
+
+	if ((now - _lastIfAddrsUpdate) <= GETIFADDRS_CACHE_TIME) {
+		return _ifaddrs;
+	}
+	_lastIfAddrsUpdate = now;
+
 	struct ifaddrs *ifa = (struct ifaddrs *)0;
 	std::vector<InetAddress> r;
+
 	if (!getifaddrs(&ifa)) {
 		struct ifaddrs *p = ifa;
 		while (p) {
@@ -334,6 +377,9 @@ std::vector<InetAddress> MacEthernetTap::ips() const
 	}
 	std::sort(r.begin(),r.end());
 	r.erase(std::unique(r.begin(),r.end()),r.end());
+
+	_ifaddrs = r;
+
 	return r;
 }
 

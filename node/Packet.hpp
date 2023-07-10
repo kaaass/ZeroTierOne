@@ -461,8 +461,9 @@ public:
 		 */
 		inline void init(const Packet &p,unsigned int fragStart,unsigned int fragLen,unsigned int fragNo,unsigned int fragTotal)
 		{
-			if ((fragStart + fragLen) > p.size())
+			if ((fragStart + fragLen) > p.size()) {
 				throw ZT_EXCEPTION_OUT_OF_BOUNDS;
+			}
 			setSize(fragLen + ZT_PROTO_MIN_FRAGMENT_LENGTH);
 
 			// NOTE: this copies both the IV/packet ID and the destination address.
@@ -792,6 +793,12 @@ public:
 		 *
 		 * ERROR response payload:
 		 *   <[8] 64-bit network ID>
+     *   <[2] 16-bit length of error-related data (optional)>
+     *   <[...] error-related data (optional)>
+     * 
+     * Error related data is a Dictionary containing things like a URL
+     * for authentication or a human-readable error message, and is
+     * optional and may be absent or empty.
 		 */
 		VERB_NETWORK_CONFIG_REQUEST = 0x0b,
 
@@ -1076,7 +1083,10 @@ public:
 		ERROR_NETWORK_ACCESS_DENIED_ = 0x07, /* extra _ at end to avoid Windows name conflict */
 
 		/* Multicasts to this group are not wanted */
-		ERROR_UNWANTED_MULTICAST = 0x08
+		ERROR_UNWANTED_MULTICAST = 0x08,
+
+    /* Network requires external or 2FA authentication (e.g. SSO). */
+    ERROR_NETWORK_AUTHENTICATION_REQUIRED = 0x09
 	};
 
 	template<unsigned int C2>
@@ -1208,9 +1218,11 @@ public:
 	 */
 	inline void setFragmented(bool f)
 	{
-		if (f)
+		if (f) {
 			(*this)[ZT_PACKET_IDX_FLAGS] |= (char)ZT_PROTO_FLAG_FRAGMENTED;
-		else (*this)[ZT_PACKET_IDX_FLAGS] &= (char)(~ZT_PROTO_FLAG_FRAGMENTED);
+		} else {
+			(*this)[ZT_PACKET_IDX_FLAGS] &= (char)(~ZT_PROTO_FLAG_FRAGMENTED);
+		}
 	}
 
 	/**
@@ -1241,6 +1253,14 @@ public:
 	}
 
 	/**
+	 * @return Whether this packet is currently encrypted
+	 */
+	inline bool isEncrypted() const
+	{
+		return (cipher() == ZT_PROTO_CIPHER_SUITE__C25519_POLY1305_SALSA2012) || (cipher() == ZT_PROTO_CIPHER_SUITE__AES_GMAC_SIV);
+	}
+
+	/**
 	 * Set this packet's cipher suite
 	 */
 	inline void setCipher(unsigned int c)
@@ -1248,9 +1268,11 @@ public:
 		unsigned char &b = (*this)[ZT_PACKET_IDX_FLAGS];
 		b = (b & 0xc7) | (unsigned char)((c << 3) & 0x38); // bits: FFCCCHHH
 		// Set DEPRECATED "encrypted" flag -- used by pre-1.0.3 peers
-		if (c == ZT_PROTO_CIPHER_SUITE__C25519_POLY1305_SALSA2012)
+		if (c == ZT_PROTO_CIPHER_SUITE__C25519_POLY1305_SALSA2012) {
 			b |= ZT_PROTO_FLAG_ENCRYPTED;
-		else b &= (~ZT_PROTO_FLAG_ENCRYPTED);
+		} else {
+			b &= (~ZT_PROTO_FLAG_ENCRYPTED);
+		}
 	}
 
 	/**
@@ -1388,8 +1410,9 @@ private:
 
 		// IV and source/destination addresses. Using the addresses divides the
 		// key space into two halves-- A->B and B->A (since order will change).
-		for(unsigned int i=0;i<18;++i) // 8 + (ZT_ADDRESS_LENGTH * 2) == 18
+		for(unsigned int i=0;i<18;++i) { // 8 + (ZT_ADDRESS_LENGTH * 2) == 18
 			out[i] = in[i] ^ d[i];
+		}
 
 		// Flags, but with hop count masked off. Hop count is altered by forwarding
 		// nodes. It's one of the only parts of a packet modifiable by people
@@ -1402,8 +1425,9 @@ private:
 		out[20] = in[20] ^ (unsigned char)((size() >> 8) & 0xff); // little endian
 
 		// Rest of raw key is used unchanged
-		for(unsigned int i=21;i<32;++i)
+		for(unsigned int i=21;i<32;++i) {
 			out[i] = in[i];
+		}
 	}
 };
 

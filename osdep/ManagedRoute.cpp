@@ -19,8 +19,8 @@
 #include <string.h>
 
 #ifdef __WINDOWS__
-#include <WinSock2.h>
-#include <Windows.h>
+#include <winsock2.h>
+#include <windows.h>
 #include <netioapi.h>
 #include <IPHlpApi.h>
 #endif
@@ -250,14 +250,26 @@ static void _routeCmd(const char *op,const InetAddress &target,const InetAddress
 		char iptmp[64];
 		if (via) {
 			if ((ifscope)&&(ifscope[0])) {
+#ifdef ZT_TRACE
+				fprintf(stderr, "DEBUG: route %s -ifscope %s %s %s" ZT_EOL_S, ifscope,((target.ss_family == AF_INET6) ? "-inet6" : "-inet"),target.toString(ttmp),via.toIpString(iptmp));
+#endif
 				::execl(ZT_BSD_ROUTE_CMD,ZT_BSD_ROUTE_CMD,op,"-ifscope",ifscope,((target.ss_family == AF_INET6) ? "-inet6" : "-inet"),target.toString(ttmp),via.toIpString(iptmp),(const char *)0);
 			} else {
+#ifdef ZT_TRACE
+				fprintf(stderr, "DEBUG: route %s %s %s %s" ZT_EOL_S, op,((target.ss_family == AF_INET6) ? "-inet6" : "-inet"),target.toString(ttmp),via.toIpString(iptmp));
+#endif
 				::execl(ZT_BSD_ROUTE_CMD,ZT_BSD_ROUTE_CMD,op,((target.ss_family == AF_INET6) ? "-inet6" : "-inet"),target.toString(ttmp),via.toIpString(iptmp),(const char *)0);
 			}
 		} else if ((localInterface)&&(localInterface[0])) {
 			if ((ifscope)&&(ifscope[0])) {
+#ifdef ZT_TRACE
+				fprintf(stderr, "DEBUG: route %s -ifscope %s %s %s -interface %s" ZT_EOL_S, op, ifscope,((target.ss_family == AF_INET6) ? "-inet6" : "-inet"),target.toString(ttmp),localInterface);
+#endif
 				::execl(ZT_BSD_ROUTE_CMD,ZT_BSD_ROUTE_CMD,op,"-ifscope",ifscope,((target.ss_family == AF_INET6) ? "-inet6" : "-inet"),target.toString(ttmp),"-interface",localInterface,(const char *)0);
 			} else {
+#ifdef ZT_TRACE
+				fprintf(stderr, "DEBUG: route %s %s %s -interface %s" ZT_EOL_S, op,((target.ss_family == AF_INET6) ? "-inet6" : "-inet"),target.toString(ttmp),localInterface);
+#endif
 				::execl(ZT_BSD_ROUTE_CMD,ZT_BSD_ROUTE_CMD,op,((target.ss_family == AF_INET6) ? "-inet6" : "-inet"),target.toString(ttmp),"-interface",localInterface,(const char *)0);
 			}
 		}
@@ -427,6 +439,24 @@ bool ManagedRoute::sync()
 
 #ifdef __BSD__ // ------------------------------------------------------------
 
+	if (_device[0]) {
+		bool haveDevice = false;
+		struct ifaddrs *ifa = (struct ifaddrs *)0;
+		if (!getifaddrs(&ifa)) {
+			struct ifaddrs *p = ifa;
+			while (p) {
+				if ((p->ifa_name)&&(!strcmp(_device, p->ifa_name))) {
+					haveDevice = true;
+					break;
+				}
+				p = p->ifa_next;
+			}
+			freeifaddrs(ifa);
+		}
+		if (!haveDevice)
+			return false;
+	}
+
 	// Find lowest metric system route that this route should override (if any)
 	InetAddress newSystemVia;
 	char newSystemDevice[128];
@@ -447,7 +477,7 @@ bool ManagedRoute::sync()
 	if ((newSystemVia)&&(!newSystemDevice[0])) {
 		rtes = _getRTEs(newSystemVia,true);
 		for(std::vector<_RTE>::iterator r(rtes.begin());r!=rtes.end();++r) {
-			if ( (r->device[0]) && (strcmp(r->device,_device) != 0) ) {
+			if ( (r->device[0]) && (strcmp(r->device,_device) != 0) && r->target.netmaskBits() != 0) {
 				Utils::scopy(newSystemDevice,sizeof(newSystemDevice),r->device);
 				break;
 			}
@@ -471,37 +501,38 @@ bool ManagedRoute::sync()
 
 		if (_systemVia) {
 			_routeCmd("add",leftt,_systemVia,_systemDevice,(const char *)0);
-			_routeCmd("change",leftt,_systemVia,_systemDevice,(const char *)0);
+			//_routeCmd("change",leftt,_systemVia,_systemDevice,(const char *)0);
 			if (rightt) {
 				_routeCmd("add",rightt,_systemVia,_systemDevice,(const char *)0);
-				_routeCmd("change",rightt,_systemVia,_systemDevice,(const char *)0);
+				//_routeCmd("change",rightt,_systemVia,_systemDevice,(const char *)0);
 			}
 		}
 	}
 
-	if (!_applied.count(leftt)) {
-		_applied[leftt] = false; // not ifscoped
+	if (leftt && !_applied.count(leftt)) {
+		_applied[leftt] = !_via;
+		//_routeCmd("delete",leftt,_via,(const char *)0,(_via) ? (const char *)0 : _device);
 		_routeCmd("add",leftt,_via,(const char *)0,(_via) ? (const char *)0 : _device);
-		_routeCmd("change",leftt,_via,(const char *)0,(_via) ? (const char *)0 : _device);
+		//_routeCmd("change",leftt,_via,(const char *)0,(_via) ? (const char *)0 : _device);
 	}
-	if ((rightt)&&(!_applied.count(rightt))) {
-		_applied[rightt] = false; // not ifscoped
+	if (rightt && !_applied.count(rightt)) {
+		_applied[rightt] = !_via;
+		//_routeCmd("delete",rightt,_via,(const char *)0,(_via) ? (const char *)0 : _device);
 		_routeCmd("add",rightt,_via,(const char *)0,(_via) ? (const char *)0 : _device);
-		_routeCmd("change",rightt,_via,(const char *)0,(_via) ? (const char *)0 : _device);
+		//_routeCmd("change",rightt,_via,(const char *)0,(_via) ? (const char *)0 : _device);
 	}
 
 #endif // __BSD__ ------------------------------------------------------------
 
 #ifdef __LINUX__ // ----------------------------------------------------------
 
-	const char *const devptr = (_via) ? (const char *)0 : _device;
-	if ((leftt)&&(!LinuxNetLink::getInstance().routeIsSet(leftt,_via,_src,devptr))) {
+	if ((leftt)&&(!LinuxNetLink::getInstance().routeIsSet(leftt,_via,_src,_device))) {
 		_applied[leftt] = false; // boolean unused
-		LinuxNetLink::getInstance().addRoute(leftt, _via, _src, devptr);
+		LinuxNetLink::getInstance().addRoute(leftt, _via, _src, _device);
 	}
-	if ((rightt)&&(!LinuxNetLink::getInstance().routeIsSet(rightt,_via,_src,devptr))) {
+	if ((rightt)&&(!LinuxNetLink::getInstance().routeIsSet(rightt,_via,_src,_device))) {
 		_applied[rightt] = false; // boolean unused
-		LinuxNetLink::getInstance().addRoute(rightt, _via, _src, devptr);
+		LinuxNetLink::getInstance().addRoute(rightt, _via, _src, _device);
 	}
 
 #endif // __LINUX__ ----------------------------------------------------------

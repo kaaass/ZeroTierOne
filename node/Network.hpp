@@ -37,6 +37,7 @@
 #include "Membership.hpp"
 #include "NetworkConfig.hpp"
 #include "CertificateOfMembership.hpp"
+#include "Metrics.hpp"
 
 #define ZT_NETWORK_MAX_INCOMING_UPDATES 3
 #define ZT_NETWORK_MAX_UPDATE_CHUNKS ((ZT_NETWORKCONFIG_DICT_CAPACITY / 1024) + 1)
@@ -205,20 +206,43 @@ public:
 	/**
 	 * Set netconf failure to 'access denied' -- called in IncomingPacket when controller reports this
 	 */
-	inline void setAccessDenied()
+	inline void setAccessDenied(void *tPtr)
 	{
 		Mutex::Lock _l(_lock);
 		_netconfFailure = NETCONF_FAILURE_ACCESS_DENIED;
+
+		_sendUpdateEvent(tPtr);
 	}
 
 	/**
 	 * Set netconf failure to 'not found' -- called by IncomingPacket when controller reports this
 	 */
-	inline void setNotFound()
+	inline void setNotFound(void *tPtr)
 	{
 		Mutex::Lock _l(_lock);
 		_netconfFailure = NETCONF_FAILURE_NOT_FOUND;
+
+		_sendUpdateEvent(tPtr);
 	}
+
+	/**
+	 * Set netconf failure to 'authentication required' possibly with an authorization URL
+	 */
+	inline void setAuthenticationRequired(void *tPtr, const char *url)
+	{
+		Mutex::Lock _l(_lock);
+		_netconfFailure = NETCONF_FAILURE_AUTHENTICATION_REQUIRED;
+		_authenticationURL = (url) ? url : "";
+		_config.ssoEnabled = true;
+		_config.ssoVersion = 0;
+		_sendUpdateEvent(tPtr);
+	}
+
+	/**
+	 * set netconf failure to 'authentication required' along with info needed
+	 * for sso full flow authentication.
+	 */
+	void setAuthenticationRequired(void *tPtr, const char* issuerURL, const char* centralEndpoint, const char* clientID, const char *ssoProvider, const char* nonce, const char* state);
 
 	/**
 	 * Causes this network to request an updated configuration from its master node now
@@ -309,8 +333,9 @@ public:
 	 */
 	inline Membership::AddCredentialResult addCredential(void *tPtr,const Capability &cap)
 	{
-		if (cap.networkId() != _id)
+		if (cap.networkId() != _id) {
 			return Membership::ADD_REJECTED;
+		}
 		Mutex::Lock _l(_lock);
 		return _membership(cap.issuedTo()).addCredential(RR,tPtr,_config,cap);
 	}
@@ -320,8 +345,9 @@ public:
 	 */
 	inline Membership::AddCredentialResult addCredential(void *tPtr,const Tag &tag)
 	{
-		if (tag.networkId() != _id)
+		if (tag.networkId() != _id) {
 			return Membership::ADD_REJECTED;
+		}
 		Mutex::Lock _l(_lock);
 		return _membership(tag.issuedTo()).addCredential(RR,tPtr,_config,tag);
 	}
@@ -336,8 +362,9 @@ public:
 	 */
 	inline Membership::AddCredentialResult addCredential(void *tPtr,const CertificateOfOwnership &coo)
 	{
-		if (coo.networkId() != _id)
+		if (coo.networkId() != _id) {
 			return Membership::ADD_REJECTED;
+		}
 		Mutex::Lock _l(_lock);
 		return _membership(coo.issuedTo()).addCredential(RR,tPtr,_config,coo);
 	}
@@ -349,10 +376,14 @@ public:
 	 * @param to Destination peer address
 	 * @param now Current time
 	 */
-	inline void pushCredentialsNow(void *tPtr,const Address &to,const int64_t now)
+	inline void peerRequestedCredentials(void *tPtr,const Address &to,const int64_t now)
 	{
 		Mutex::Lock _l(_lock);
-		_membership(to).pushCredentials(RR,tPtr,now,to,_config);
+		Membership &m = _membership(to);
+		const int64_t lastPushed = m.lastPushedCredentials();
+		if ((lastPushed < _lastConfigUpdate)||((now - lastPushed) > ZT_PEER_CREDENTIALS_REQUEST_RATE_LIMIT)) {
+			m.pushCredentials(RR,tPtr,now,to,_config);
+		}
 	}
 
 	/**
@@ -366,8 +397,10 @@ public:
 	{
 		Mutex::Lock _l(_lock);
 		Membership &m = _membership(to);
-		if (m.shouldPushCredentials(now))
+		const int64_t lastPushed = m.lastPushedCredentials();
+		if ((lastPushed < _lastConfigUpdate)||((now - lastPushed) > ZT_PEER_ACTIVITY_TIMEOUT)) {
 			m.pushCredentials(RR,tPtr,now,to,_config);
+		}
 	}
 
 	/**
@@ -402,10 +435,12 @@ private:
 	void _announceMulticastGroupsTo(void *tPtr,const Address &peer,const std::vector<MulticastGroup> &allMulticastGroups);
 	std::vector<MulticastGroup> _allMulticastGroups() const;
 	Membership &_membership(const Address &a);
+	void _sendUpdateEvent(void *tPtr);
 
 	const RuntimeEnvironment *const RR;
 	void *_uPtr;
 	const uint64_t _id;
+	std::string _nwidStr;
 	uint64_t _lastAnnouncedMulticastGroupsUpstream;
 	MAC _mac; // local MAC address
 	bool _portInitialized;
@@ -415,7 +450,7 @@ private:
 	Hashtable< MAC,Address > _remoteBridgeRoutes; // remote addresses where given MACs are reachable (for tracking devices behind remote bridges)
 
 	NetworkConfig _config;
-	uint64_t _lastConfigUpdate;
+	int64_t _lastConfigUpdate;
 
 	struct _IncomingConfigChunk
 	{
@@ -435,17 +470,25 @@ private:
 		NETCONF_FAILURE_NONE,
 		NETCONF_FAILURE_ACCESS_DENIED,
 		NETCONF_FAILURE_NOT_FOUND,
-		NETCONF_FAILURE_INIT_FAILED
+		NETCONF_FAILURE_INIT_FAILED,
+		NETCONF_FAILURE_AUTHENTICATION_REQUIRED
 	} _netconfFailure;
 	int _portError; // return value from port config callback
+	std::string _authenticationURL;
 
 	Hashtable<Address,Membership> _memberships;
 
 	Mutex _lock;
 
 	AtomicCounter __refCount;
+
+	prometheus::simpleapi::gauge_metric_t _num_multicast_groups;
+	prometheus::simpleapi::counter_metric_t _incoming_packets_accepted;
+	prometheus::simpleapi::counter_metric_t _incoming_packets_dropped;
+	prometheus::simpleapi::counter_metric_t _outgoing_packets_accepted;
+	prometheus::simpleapi::counter_metric_t _outgoing_packets_dropped;
 };
 
-} // namespace ZeroTier
+}	// namespace ZeroTier
 
 #endif

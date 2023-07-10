@@ -34,7 +34,8 @@
 #include "Salsa20.hpp"
 #include "NetworkController.hpp"
 #include "Hashtable.hpp"
-#include "BondController.hpp"
+#include "Bond.hpp"
+#include "SelfAwareness.hpp"
 
 // Bit mask for "expecting reply" hash
 #define ZT_EXPECTING_REPLIES_BUCKET_MASK1 255
@@ -137,8 +138,9 @@ public:
 	{
 		Mutex::Lock _l(_networks_m);
 		const SharedPtr<Network> *n = _networks.get(nwid);
-		if (n)
+		if (n) {
 			return *n;
+		}
 		return SharedPtr<Network>();
 	}
 
@@ -155,8 +157,9 @@ public:
 		Hashtable< uint64_t,SharedPtr<Network> >::Iterator i(*const_cast< Hashtable< uint64_t,SharedPtr<Network> > * >(&_networks));
 		uint64_t *k = (uint64_t *)0;
 		SharedPtr<Network> *v = (SharedPtr<Network> *)0;
-		while (i.next(k,v))
+		while (i.next(k,v)) {
 			nw.push_back(*v);
+		}
 		return nw;
 	}
 
@@ -187,7 +190,9 @@ public:
 
 	inline const Identity &identity() const { return _RR.identity; }
 
-	inline BondController *bondController() const { return _RR.bc; }
+	inline const std::vector<InetAddress> SurfaceAddresses() const { return _RR.sa->whoami(); }
+
+	inline Bond *bondController() const { return _RR.bc; }
 
 	/**
 	 * Register that we are expecting a reply to a packet ID
@@ -220,8 +225,9 @@ public:
 		const uint32_t pid2 = (uint32_t)(packetId >> 32);
 		const unsigned long bucket = (unsigned long)(pid2 & ZT_EXPECTING_REPLIES_BUCKET_MASK1);
 		for(unsigned long i=0;i<=ZT_EXPECTING_REPLIES_BUCKET_MASK2;++i) {
-			if (_expectingRepliesTo[bucket][i] == pid2)
+			if (_expectingRepliesTo[bucket][i] == pid2) {
 				return true;
+			}
 		}
 		return false;
 	}
@@ -245,7 +251,7 @@ public:
 
 	virtual void ncSendConfig(uint64_t nwid,uint64_t requestPacketId,const Address &destination,const NetworkConfig &nc,bool sendLegacyFormatConfig);
 	virtual void ncSendRevocation(const Address &destination,const Revocation &rev);
-	virtual void ncSendError(uint64_t nwid,uint64_t requestPacketId,const Address &destination,NetworkController::ErrorCode errorCode);
+	virtual void ncSendError(uint64_t nwid,uint64_t requestPacketId,const Address &destination,NetworkController::ErrorCode errorCode, const void *errorData, unsigned int errorDataSize);
 
 	inline const Address &remoteTraceTarget() const { return _remoteTraceTarget; }
 	inline Trace::Level remoteTraceLevel() const { return _remoteTraceLevel; }
@@ -255,8 +261,9 @@ public:
 		_localControllerAuthorizations_m.lock();
 		const int64_t *const at = _localControllerAuthorizations.get(_LocalControllerAuth(nwid,addr));
 		_localControllerAuthorizations_m.unlock();
-		if (at)
+		if (at) {
 			return ((now - *at) < (ZT_NETWORK_AUTOCONF_DELAY * 3));
+		}
 		return false;
 	}
 
@@ -264,6 +271,16 @@ public:
 	{
 		++_stats.inVerbCounts[v];
 		_stats.inVerbBytes[v] += (uint64_t)bytes;
+	}
+
+	inline void setLowBandwidthMode(bool isEnabled)
+	{
+		_lowBandwidthMode = isEnabled;
+	}
+
+	inline bool lowBandwidthModeEnabled()
+	{
+		return _lowBandwidthMode;
 	}
 
 private:
@@ -313,6 +330,7 @@ private:
 	int64_t _lastMemoizedTraceSettings;
 	volatile int64_t _prngState[2];
 	bool _online;
+	bool _lowBandwidthMode;
 };
 
 } // namespace ZeroTier

@@ -94,6 +94,8 @@ public:
 		 * ZeroTier address to whom certificate was issued
 		 */
 		COM_RESERVED_ID_ISSUED_TO = 2
+
+		// IDs 3-6 reserved for full hash of identity to which this COM was issued.
 	};
 
 	/**
@@ -110,20 +112,7 @@ public:
 	 * @param nwid Network ID
 	 * @param issuedTo Certificate recipient
 	 */
-	CertificateOfMembership(uint64_t timestamp,uint64_t timestampMaxDelta,uint64_t nwid,const Address &issuedTo)
-	{
-		_qualifiers[0].id = COM_RESERVED_ID_TIMESTAMP;
-		_qualifiers[0].value = timestamp;
-		_qualifiers[0].maxDelta = timestampMaxDelta;
-		_qualifiers[1].id = COM_RESERVED_ID_NETWORK_ID;
-		_qualifiers[1].value = nwid;
-		_qualifiers[1].maxDelta = 0;
-		_qualifiers[2].id = COM_RESERVED_ID_ISSUED_TO;
-		_qualifiers[2].value = issuedTo.toInt();
-		_qualifiers[2].maxDelta = 0xffffffffffffffffULL;
-		_qualifierCount = 3;
-		memset(_signature.data,0,ZT_C25519_SIGNATURE_LEN);
-	}
+	CertificateOfMembership(uint64_t timestamp,uint64_t timestampMaxDelta,uint64_t nwid,const Identity &issuedTo);
 
 	/**
 	 * Create from binary-serialized COM in buffer
@@ -153,8 +142,9 @@ public:
 	inline int64_t timestamp() const
 	{
 		for(unsigned int i=0;i<_qualifierCount;++i) {
-			if (_qualifiers[i].id == COM_RESERVED_ID_TIMESTAMP)
+			if (_qualifiers[i].id == COM_RESERVED_ID_TIMESTAMP) {
 				return _qualifiers[i].value;
+			}
 		}
 		return 0;
 	}
@@ -165,8 +155,9 @@ public:
 	inline Address issuedTo() const
 	{
 		for(unsigned int i=0;i<_qualifierCount;++i) {
-			if (_qualifiers[i].id == COM_RESERVED_ID_ISSUED_TO)
+			if (_qualifiers[i].id == COM_RESERVED_ID_ISSUED_TO) {
 				return Address(_qualifiers[i].value);
+			}
 		}
 		return Address();
 	}
@@ -177,41 +168,12 @@ public:
 	inline uint64_t networkId() const
 	{
 		for(unsigned int i=0;i<_qualifierCount;++i) {
-			if (_qualifiers[i].id == COM_RESERVED_ID_NETWORK_ID)
+			if (_qualifiers[i].id == COM_RESERVED_ID_NETWORK_ID) {
 				return _qualifiers[i].value;
+			}
 		}
 		return 0ULL;
 	}
-
-	/**
-	 * Add or update a qualifier in this certificate
-	 *
-	 * Any signature is invalidated and signedBy is set to null.
-	 *
-	 * @param id Qualifier ID
-	 * @param value Qualifier value
-	 * @param maxDelta Qualifier maximum allowed difference (absolute value of difference)
-	 */
-	void setQualifier(uint64_t id,uint64_t value,uint64_t maxDelta);
-	inline void setQualifier(ReservedId id,uint64_t value,uint64_t maxDelta) { setQualifier((uint64_t)id,value,maxDelta); }
-
-#ifdef ZT_SUPPORT_OLD_STYLE_NETCONF
-	/**
-	 * @return String-serialized representation of this certificate
-	 */
-	std::string toString() const;
-
-	/**
-	 * Set this certificate equal to the hex-serialized string
-	 *
-	 * Invalid strings will result in invalid or undefined certificate
-	 * contents. These will subsequently fail validation and comparison.
-	 * Empty strings will result in an empty certificate.
-	 *
-	 * @param s String to deserialize
-	 */
-	void fromString(const char *s);
-#endif // ZT_SUPPORT_OLD_STYLE_NETCONF
 
 	/**
 	 * Compare two certificates for parameter agreement
@@ -224,9 +186,10 @@ public:
 	 * tuples present in this cert but not in other result in 'false'.
 	 *
 	 * @param other Cert to compare with
+	 * @param otherIdentity Identity of other node
 	 * @return True if certs agree and 'other' may be communicated with
 	 */
-	bool agreesWith(const CertificateOfMembership &other) const;
+	bool agreesWith(const CertificateOfMembership &other, const Identity &otherIdentity) const;
 
 	/**
 	 * Sign this certificate
@@ -266,8 +229,9 @@ public:
 			b.append(_qualifiers[i].maxDelta);
 		}
 		_signedBy.appendTo(b);
-		if (_signedBy)
+		if (_signedBy) {
 			b.append(_signature.data,ZT_C25519_SIGNATURE_LEN);
+		}
 	}
 
 	template<unsigned int C>
@@ -278,16 +242,20 @@ public:
 		_qualifierCount = 0;
 		_signedBy.zero();
 
-		if (b[p++] != 1)
+		if (b[p++] != 1) {
 			throw ZT_EXCEPTION_INVALID_SERIALIZED_DATA_INVALID_TYPE;
+		}
 
-		unsigned int numq = b.template at<uint16_t>(p); p += sizeof(uint16_t);
+		unsigned int numq = b.template at<uint16_t>(p);
+		p += sizeof(uint16_t);
 		uint64_t lastId = 0;
 		for(unsigned int i=0;i<numq;++i) {
 			const uint64_t qid = b.template at<uint64_t>(p);
-			if (qid < lastId)
+			if (qid < lastId) {
 				throw ZT_EXCEPTION_INVALID_SERIALIZED_DATA_BAD_ENCODING;
-			else lastId = qid;
+			} else {
+				lastId = qid;
+			}
 			if (_qualifierCount < ZT_NETWORK_COM_MAX_QUALIFIERS) {
 				_qualifiers[_qualifierCount].id = qid;
 				_qualifiers[_qualifierCount].value = b.template at<uint64_t>(p + 8);
@@ -312,15 +280,18 @@ public:
 
 	inline bool operator==(const CertificateOfMembership &c) const
 	{
-		if (_signedBy != c._signedBy)
+		if (_signedBy != c._signedBy) {
 			return false;
-		if (_qualifierCount != c._qualifierCount)
+		}
+		if (_qualifierCount != c._qualifierCount) {
 			return false;
+		}
 		for(unsigned int i=0;i<_qualifierCount;++i) {
 			const _Qualifier &a = _qualifiers[i];
 			const _Qualifier &b = c._qualifiers[i];
-			if ((a.id != b.id)||(a.value != b.value)||(a.maxDelta != b.maxDelta))
+			if ((a.id != b.id)||(a.value != b.value)||(a.maxDelta != b.maxDelta)) {
 				return false;
+			}
 		}
 		return (memcmp(_signature.data,c._signature.data,ZT_C25519_SIGNATURE_LEN) == 0);
 	}

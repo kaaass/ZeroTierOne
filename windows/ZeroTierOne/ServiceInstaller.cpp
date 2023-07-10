@@ -49,26 +49,34 @@ std::string InstallService(PSTR pszServiceName,
                     PSTR pszAccount, 
                     PSTR pszPassword)
 {
-	std::string ret;
-    char szPathTmp[MAX_PATH],szPath[MAX_PATH];
+    std::string ret;
+    std::string path(0x7FFF, '\0');
+
     SC_HANDLE schSCManager = NULL;
     SC_HANDLE schService = NULL;
+    SERVICE_DESCRIPTION sd;
+    LPTSTR szDesc = TEXT("ZeroTier network virtualization service.");
 
-    if (GetModuleFileName(NULL, szPathTmp, ARRAYSIZE(szPath)) == 0)
+    DWORD dwCharacters = GetModuleFileName(NULL, path.data(), path.size());
+
+    if (dwCharacters == 0)
     {
-		ret = "GetModuleFileName failed, unable to get path to self";
+        ret = "GetModuleFileName failed, unable to get path to self";
         goto Cleanup;
     }
 
-	// Quote path in case it contains spaces
-	_snprintf_s(szPath,sizeof(szPath),"\"%s\"",szPathTmp);
+    // Trim excess nulls which the returned size does not include
+    path.resize(dwCharacters);
+
+    // Quote path in case it contains spaces
+    path = '"' + path + '"';
 
     // Open the local default service control manager database
     schSCManager = OpenSCManager(NULL, NULL, SC_MANAGER_CONNECT | 
         SC_MANAGER_CREATE_SERVICE);
     if (schSCManager == NULL)
     {
-		ret = "OpenSCManager failed";
+        ret = "OpenSCManager failed";
         goto Cleanup;
     }
 
@@ -77,11 +85,11 @@ std::string InstallService(PSTR pszServiceName,
         schSCManager,                   // SCManager database
         pszServiceName,                 // Name of service
         pszDisplayName,                 // Name to display
-        SERVICE_QUERY_STATUS,           // Desired access
+        SERVICE_ALL_ACCESS,             // Desired access
         SERVICE_WIN32_OWN_PROCESS,      // Service type
         dwStartType,                    // Service start type
         SERVICE_ERROR_NORMAL,           // Error control type
-        szPath,                         // Service's binary
+        path.c_str(),                   // Service's binary
         NULL,                           // No load ordering group
         NULL,                           // No tag identifier
         pszDependencies,                // Dependencies
@@ -90,10 +98,13 @@ std::string InstallService(PSTR pszServiceName,
         );
     if (schService == NULL)
     {
-		ret = "CreateService failed";
+        ret = "CreateService failed";
         goto Cleanup;
     }
 
+    // Setup service description
+    sd.lpDescription = szDesc;
+    ChangeServiceConfig2(schService, SERVICE_CONFIG_DESCRIPTION, &sd);
 Cleanup:
     // Centralized cleanup for all allocated resources.
     if (schSCManager)
@@ -107,7 +118,7 @@ Cleanup:
         schService = NULL;
     }
 
-	return ret;
+    return ret;
 }
 
 

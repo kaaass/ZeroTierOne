@@ -61,8 +61,9 @@ void SelfAwareness::iam(void *tPtr,const Address &reporter,const int64_t receive
 {
 	const InetAddress::IpScope scope = myPhysicalAddress.ipScope();
 
-	if ((scope != reporterPhysicalAddress.ipScope())||(scope == InetAddress::IP_SCOPE_NONE)||(scope == InetAddress::IP_SCOPE_LOOPBACK)||(scope == InetAddress::IP_SCOPE_MULTICAST))
+	if ((scope != reporterPhysicalAddress.ipScope())||(scope == InetAddress::IP_SCOPE_NONE)||(scope == InetAddress::IP_SCOPE_LOOPBACK)||(scope == InetAddress::IP_SCOPE_MULTICAST)) {
 		return;
+	}
 
 	Mutex::Lock _l(_phy_m);
 	PhySurfaceEntry &entry = _phy[PhySurfaceKey(reporter,receivedOnLocalSocket,reporterPhysicalAddress,scope)];
@@ -83,8 +84,9 @@ void SelfAwareness::iam(void *tPtr,const Address &reporter,const int64_t receive
 			PhySurfaceKey *k = (PhySurfaceKey *)0;
 			PhySurfaceEntry *e = (PhySurfaceEntry *)0;
 			while (i.next(k,e)) {
-				if ((k->reporterPhysicalAddress != reporterPhysicalAddress)&&(k->scope == scope))
+				if ((k->reporterPhysicalAddress != reporterPhysicalAddress)&&(k->scope == scope)) {
 					_phy.erase(*k);
+				}
 			}
 		}
 
@@ -99,6 +101,21 @@ void SelfAwareness::iam(void *tPtr,const Address &reporter,const int64_t receive
 	}
 }
 
+std::vector<InetAddress> SelfAwareness::whoami()
+{
+	std::vector<InetAddress> surfaceAddresses;
+	Mutex::Lock _l(_phy_m);
+	Hashtable< PhySurfaceKey,PhySurfaceEntry >::Iterator i(_phy);
+	PhySurfaceKey *k = (PhySurfaceKey *)0;
+	PhySurfaceEntry *e = (PhySurfaceEntry *)0;
+	while (i.next(k,e)) {
+		if (std::find(surfaceAddresses.begin(), surfaceAddresses.end(), e->mySurface) == surfaceAddresses.end()) {
+			surfaceAddresses.push_back(e->mySurface);
+		}
+	}
+	return surfaceAddresses;
+}
+
 void SelfAwareness::clean(int64_t now)
 {
 	Mutex::Lock _l(_phy_m);
@@ -106,8 +123,9 @@ void SelfAwareness::clean(int64_t now)
 	PhySurfaceKey *k = (PhySurfaceKey *)0;
 	PhySurfaceEntry *e = (PhySurfaceEntry *)0;
 	while (i.next(k,e)) {
-		if ((now - e->ts) >= ZT_SELFAWARENESS_ENTRY_TIMEOUT)
+		if ((now - e->ts) >= ZT_SELFAWARENESS_ENTRY_TIMEOUT) {
 			_phy.erase(*k);
+		}
 	}
 }
 

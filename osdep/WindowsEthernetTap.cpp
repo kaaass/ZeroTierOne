@@ -15,14 +15,14 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
-#include <WinSock2.h>
-#include <Windows.h>
+#include <winsock2.h>
+#include <windows.h>
 #include <tchar.h>
 #include <malloc.h>
 #include <winreg.h>
 #include <wchar.h>
 #include <ws2ipdef.h>
-#include <WS2tcpip.h>
+#include <ws2tcpip.h>
 #include <IPHlpApi.h>
 #include <nldef.h>
 #include <netioapi.h>
@@ -467,7 +467,8 @@ WindowsEthernetTap::WindowsEthernetTap(
 	_pathToHelpers(hp),
 	_run(true),
 	_initialized(false),
-	_enabled(true)
+	_enabled(true),
+	_lastIfAddrsUpdate(0)
 {
 	char subkeyName[1024];
 	char subkeyClass[1024];
@@ -749,6 +750,14 @@ std::vector<InetAddress> WindowsEthernetTap::ips() const
 	if (!_initialized)
 		return addrs;
 
+	uint64_t now = OSUtils::now();
+
+	if ((now - _lastIfAddrsUpdate) <= GETIFADDRS_CACHE_TIME) {
+		return _ifaddrs;
+	}
+
+	_lastIfAddrsUpdate = now;
+
 	try {
 		MIB_UNICASTIPADDRESS_TABLE *ipt = (MIB_UNICASTIPADDRESS_TABLE *)0;
 		if (GetUnicastIpAddressTable(AF_UNSPEC,&ipt) == NO_ERROR) {
@@ -776,6 +785,8 @@ std::vector<InetAddress> WindowsEthernetTap::ips() const
 
 	std::sort(addrs.begin(),addrs.end());
 	addrs.erase(std::unique(addrs.begin(),addrs.end()),addrs.end());
+
+	_ifaddrs = addrs;
 
 	return addrs;
 }
@@ -810,6 +821,7 @@ void WindowsEthernetTap::setFriendlyName(const char *dn)
 {
 	if (!_initialized)
 		return;
+
 	HKEY ifp;
 	if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,(std::string("SYSTEM\\CurrentControlSet\\Control\\Network\\{4D36E972-E325-11CE-BFC1-08002BE10318}\\") + _netCfgInstanceId).c_str(),0,KEY_READ|KEY_WRITE,&ifp) == ERROR_SUCCESS) {
 		RegSetKeyValueA(ifp,"Connection","Name",REG_SZ,(LPCVOID)dn,(DWORD)(strlen(dn)+1));
@@ -849,12 +861,14 @@ void WindowsEthernetTap::setFriendlyName(const char *dn)
 					NETCON_PROPERTIES *ncp = nullptr;
 					nc->GetProperties(&ncp);
 
-					GUID curId = ncp->guidId;
-					if (curId == _deviceGuid) {
-						wchar_t wtext[255];
-						mbstowcs(wtext, dn, strlen(dn)+1);
-						nc->Rename(wtext);
-						found = true;
+					if (ncp != nullptr) {
+						GUID curId = ncp->guidId;
+						if (curId == _deviceGuid) {
+							wchar_t wtext[255];
+							mbstowcs(wtext, dn, strlen(dn)+1);
+							nc->Rename(wtext);
+							found = true;
+						}
 					}
 					nc->Release();
 				}
@@ -864,6 +878,16 @@ void WindowsEthernetTap::setFriendlyName(const char *dn)
 		ev->Release();
 	}
 	nsecc->Release();
+
+	_friendlyName_m.lock();
+	_friendlyName = dn;
+	_friendlyName_m.unlock();
+}
+
+std::string WindowsEthernetTap::friendlyName() const
+{
+	Mutex::Lock l(_friendlyName_m);
+	return _friendlyName;
 }
 
 void WindowsEthernetTap::scanMulticastGroups(std::vector<MulticastGroup> &added,std::vector<MulticastGroup> &removed)

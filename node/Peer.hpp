@@ -33,8 +33,8 @@
 #include "Hashtable.hpp"
 #include "Mutex.hpp"
 #include "Bond.hpp"
-#include "BondController.hpp"
 #include "AES.hpp"
+#include "Metrics.hpp"
 
 #define ZT_PEER_MAX_SERIALIZED_STATE_SIZE (sizeof(Peer) + 32 + (sizeof(Path) * 2))
 
@@ -51,10 +51,13 @@ class Peer
 	friend class Bond;
 
 private:
-	Peer() {} // disabled to prevent bugs -- should not be constructed uninitialized
+	Peer() = delete; // disabled to prevent bugs -- should not be constructed uninitialized
 
 public:
-	~Peer() { Utils::burn(_key,sizeof(_key)); }
+	~Peer() {
+		Utils::burn(_key,sizeof(_key));
+		RR->bc->destroyBond(_id.address().toInt());
+	}
 
 	/**
 	 * Construct a new peer
@@ -117,9 +120,12 @@ public:
 		Mutex::Lock _l(_paths_m);
 		for(unsigned int i=0;i<ZT_MAX_PEER_NETWORK_PATHS;++i) {
 			if (_paths[i].p) {
-				if (((now - _paths[i].lr) < ZT_PEER_PATH_EXPIRATION)&&(_paths[i].p->address() == addr))
+				if (((now - _paths[i].lr) < ZT_PEER_PATH_EXPIRATION)&&(_paths[i].p->address() == addr)) {
 					return true;
-			} else break;
+				}
+			} else {
+				break;
+			}
 		}
 		return false;
 	}
@@ -137,8 +143,9 @@ public:
 	inline bool sendDirect(void *tPtr,const void *data,unsigned int len,int64_t now,bool force)
 	{
 		SharedPtr<Path> bp(getAppropriatePath(now,force));
-		if (bp)
+		if (bp) {
 			return bp->send(RR,tPtr,data,len,now);
+		}
 		return false;
 	}
 
@@ -279,7 +286,9 @@ public:
 		std::vector< SharedPtr<Path> > pp;
 		Mutex::Lock _l(_paths_m);
 		for(unsigned int i=0;i<ZT_MAX_PEER_NETWORK_PATHS;++i) {
-			if (!_paths[i].p) break;
+			if (!_paths[i].p) {
+				break;
+			}
 			pp.push_back(_paths[i].p);
 		}
 		return pp;
@@ -300,17 +309,20 @@ public:
 	 */
 	inline int64_t isActive(int64_t now) const { return ((now - _lastNontrivialReceive) < ZT_PEER_ACTIVITY_TIMEOUT); }
 
+	inline int64_t lastSentFullHello() { return _lastSentFullHello; }
+
 	/**
 	 * @return Latency in milliseconds of best/aggregate path or 0xffff if unknown / no paths
 	 */
 	inline unsigned int latency(const int64_t now)
 	{
-		if (_canUseMultipath) {
+		if (_localMultipathSupported) {
 			return (int)_lastComputedAggregateMeanLatency;
 		} else {
 			SharedPtr<Path> bp(getAppropriatePath(now,false));
-			if (bp)
-				return bp->latency();
+			if (bp) {
+				return (unsigned int)bp->latency();
+			}
 			return 0xffff;
 		}
 	}
@@ -329,11 +341,13 @@ public:
 	inline unsigned int relayQuality(const int64_t now)
 	{
 		const uint64_t tsr = now - _lastReceive;
-		if (tsr >= ZT_PEER_ACTIVITY_TIMEOUT)
+		if (tsr >= ZT_PEER_ACTIVITY_TIMEOUT) {
 			return (~(unsigned int)0);
+		}
 		unsigned int l = latency(now);
-		if (!l)
+		if (!l) {
 			l = 0xffff;
+		}
 		return (l * (((unsigned int)tsr / (ZT_PEER_PING_PERIOD + 1000)) + 1));
 	}
 
@@ -375,9 +389,11 @@ public:
 	 */
 	inline bool rateGatePushDirectPaths(const int64_t now)
 	{
-		if ((now - _lastDirectPathPushReceive) <= ZT_PUSH_DIRECT_PATHS_CUTOFF_TIME)
+		if ((now - _lastDirectPathPushReceive) <= ZT_PUSH_DIRECT_PATHS_CUTOFF_TIME) {
 			++_directPathPushCutoffCount;
-		else _directPathPushCutoffCount = 0;
+		} else {
+			_directPathPushCutoffCount = 0;
+		}
 		_lastDirectPathPushReceive = now;
 		return (_directPathPushCutoffCount < ZT_PUSH_DIRECT_PATHS_CUTOFF_LIMIT);
 	}
@@ -387,11 +403,11 @@ public:
 	 */
 	inline bool rateGateCredentialsReceived(const int64_t now)
 	{
-		if ((now - _lastCredentialsReceived) <= ZT_PEER_CREDENTIALS_CUTOFF_TIME)
-			++_credentialsCutoffCount;
-		else _credentialsCutoffCount = 0;
-		_lastCredentialsReceived = now;
-		return (_directPathPushCutoffCount < ZT_PEER_CREDEITIALS_CUTOFF_LIMIT);
+		if ((now - _lastCredentialsReceived) >= ZT_PEER_CREDENTIALS_RATE_LIMIT) {
+			_lastCredentialsReceived = now;
+			return true;
+		}
+		return false;
 	}
 
 	/**
@@ -419,38 +435,6 @@ public:
 	}
 
 	/**
-	 * Rate limit gate for inbound ECHO requests. This rate limiter works
-	 * by draining a certain number of requests per unit time. Each peer may
-	 * theoretically receive up to ZT_ECHO_CUTOFF_LIMIT requests per second.
-	 */
-	inline bool rateGateEchoRequest(const int64_t now)
-	{
-		/*
-		// TODO: Rethink this
-		if (_canUseMultipath) {
-			_echoRequestCutoffCount++;
-			int numToDrain = (now - _lastEchoCheck) / ZT_ECHO_DRAINAGE_DIVISOR;
-			_lastEchoCheck = now;
-			fprintf(stderr, "ZT_ECHO_CUTOFF_LIMIT=%d, (now - _lastEchoCheck)=%d, numToDrain=%d, ZT_ECHO_DRAINAGE_DIVISOR=%d\n", ZT_ECHO_CUTOFF_LIMIT, (now - _lastEchoCheck), numToDrain, ZT_ECHO_DRAINAGE_DIVISOR);
-			if (_echoRequestCutoffCount > numToDrain) {
-				_echoRequestCutoffCount-=numToDrain;
-			}
-			else {
-				_echoRequestCutoffCount = 0;
-			}
-			return (_echoRequestCutoffCount < ZT_ECHO_CUTOFF_LIMIT);
-		} else {
-			if ((now - _lastEchoRequestReceived) >= (ZT_PEER_GENERAL_RATE_LIMIT)) {
-				_lastEchoRequestReceived = now;
-				return true;
-			}
-			return false;
-		}
-		*/
-		return true;
-	}
-
-	/**
 	 * Serialize a peer for storage in local cache
 	 *
 	 * This does not serialize everything, just non-ephemeral information.
@@ -458,7 +442,7 @@ public:
 	template<unsigned int C>
 	inline void serializeForCache(Buffer<C> &b) const
 	{
-		b.append((uint8_t)1);
+		b.append((uint8_t)2);
 
 		_id.serialize(b);
 
@@ -471,13 +455,16 @@ public:
 			Mutex::Lock _l(_paths_m);
 			unsigned int pc = 0;
 			for(unsigned int i=0;i<ZT_MAX_PEER_NETWORK_PATHS;++i) {
-				if (_paths[i].p)
+				if (_paths[i].p) {
 					++pc;
-				else break;
+				} else {
+					break;
+				}
 			}
 			b.append((uint16_t)pc);
-			for(unsigned int i=0;i<pc;++i)
+			for(unsigned int i=0;i<pc;++i) {
 				_paths[i].p->address().serialize(b);
+			}
 		}
 	}
 
@@ -486,31 +473,39 @@ public:
 	{
 		try {
 			unsigned int ptr = 0;
-			if (b[ptr++] != 1)
+			if (b[ptr++] != 2) {
 				return SharedPtr<Peer>();
+			}
 
 			Identity id;
 			ptr += id.deserialize(b,ptr);
-			if (!id)
+			if (!id) {
 				return SharedPtr<Peer>();
+			}
 
 			SharedPtr<Peer> p(new Peer(renv,renv->identity,id));
 
-			p->_vProto = b.template at<uint16_t>(ptr); ptr += 2;
-			p->_vMajor = b.template at<uint16_t>(ptr); ptr += 2;
-			p->_vMinor = b.template at<uint16_t>(ptr); ptr += 2;
-			p->_vRevision = b.template at<uint16_t>(ptr); ptr += 2;
+			p->_vProto = b.template at<uint16_t>(ptr);
+			ptr += 2;
+			p->_vMajor = b.template at<uint16_t>(ptr);
+			ptr += 2;
+			p->_vMinor = b.template at<uint16_t>(ptr);
+			ptr += 2;
+			p->_vRevision = b.template at<uint16_t>(ptr);
+			ptr += 2;
 
 			// When we deserialize from the cache we don't actually restore paths. We
 			// just try them and then re-learn them if they happen to still be up.
 			// Paths are fairly ephemeral in the real world in most cases.
-			const unsigned int tryPathCount = b.template at<uint16_t>(ptr); ptr += 2;
+			const unsigned int tryPathCount = b.template at<uint16_t>(ptr);
+			ptr += 2;
 			for(unsigned int i=0;i<tryPathCount;++i) {
 				InetAddress inaddr;
 				try {
 					ptr += inaddr.deserialize(b,ptr);
-					if (inaddr)
+					if (inaddr) {
 						p->attemptToContactAt(tPtr,-1,inaddr,now,true);
+					}
 				} catch ( ... ) {
 					break;
 				}
@@ -523,16 +518,20 @@ public:
 	}
 
 	/**
-	 *
-	 * @return
+	 * @return The bonding policy used to reach this peer
 	 */
-	SharedPtr<Bond> bond() { return _bondToPeer; }
+	SharedPtr<Bond> bond() { return _bond; }
 
 	/**
-	 *
-	 * @return
+	 * @return The bonding policy used to reach this peer
 	 */
-	inline int8_t bondingPolicy() { return _bondingPolicy; }
+	inline int8_t bondingPolicy() {
+		Mutex::Lock _l(_bond_m);
+		if (_bond) {
+			return _bond->policy();
+		}
+		return ZT_BOND_POLICY_NONE;
+	}
 
 	//inline const AES *aesKeysIfSupported() const
 	//{ return (const AES *)0; }
@@ -562,7 +561,6 @@ private:
 	int64_t _lastTriedMemorizedPath;
 	int64_t _lastDirectPathPushSent;
 	int64_t _lastDirectPathPushReceive;
-	int64_t _lastEchoRequestReceived;
 	int64_t _lastCredentialRequestSent;
 	int64_t _lastWhoisRequestReceived;
 	int64_t _lastCredentialsReceived;
@@ -582,27 +580,33 @@ private:
 
 	_PeerPath _paths[ZT_MAX_PEER_NETWORK_PATHS];
 	Mutex _paths_m;
+	Mutex _bond_m;
+
+	bool _isLeaf;
 
 	Identity _id;
 
 	unsigned int _directPathPushCutoffCount;
-	unsigned int _credentialsCutoffCount;
 	unsigned int _echoRequestCutoffCount;
 
 	AtomicCounter __refCount;
 
-	bool _remotePeerMultipathEnabled;
-	int _uniqueAlivePathCount;
 	bool _localMultipathSupported;
-	bool _remoteMultipathSupported;
-	bool _canUseMultipath;
 
 	volatile bool _shouldCollectPathStatistics;
-	volatile int8_t _bondingPolicy;
 
 	int32_t _lastComputedAggregateMeanLatency;
 
-	SharedPtr<Bond> _bondToPeer;
+	SharedPtr<Bond> _bond;
+
+#ifndef ZT_NO_PEER_METRICS
+	prometheus::Histogram<uint64_t> &_peer_latency;
+	prometheus::simpleapi::gauge_metric_t _alive_path_count;
+	prometheus::simpleapi::gauge_metric_t _dead_path_count;
+	prometheus::simpleapi::counter_metric_t _incoming_packet;
+	prometheus::simpleapi::counter_metric_t _outgoing_packet;
+	prometheus::simpleapi::counter_metric_t _packet_errors;
+#endif
 };
 
 } // namespace ZeroTier

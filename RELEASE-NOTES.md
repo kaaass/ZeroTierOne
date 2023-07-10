@@ -1,6 +1,160 @@
 ZeroTier Release Notes
 ======
 
+# 2023-03-23 -- Version 1.10.6
+
+  * Prevent binding temporary ipv6 addresses on macos (#1910)
+  * Prevent path-learning loops (#1914)
+  * Prevent infinite loop of UAC prompts in tray app
+
+# 2023-03-10 -- Version 1.10.5
+
+ * Fix for high CPU usage bug on Windows
+
+# 2023-03-07 -- Version 1.10.4
+
+ * SECURITY FIX (Windows): this version fixes a file permission problem on
+   Windows that could allow non-privileged users on a Windows system to read
+   privileged files in the ZeroTier service's working directory. This could
+   allow an unprivileged local Windows user to administrate the local ZeroTier
+   instance without appropriate local permissions. This issue is not remotely
+   exploitable unless a remote user can read arbitrary local files, and does
+   not impact other operating systems.
+
+ * Fix a bug in the handling of multiple IP address assignments to virtual
+   interfaces on macOS.
+
+# 2023-02-15 -- Version 1.10.3
+
+ * Fix for duplicate paths in client. Could cause connectivity issues. Affects all platforms.
+ * Fix for Ethernet Tap MTU setting, would not properly apply on Linux.
+ * Fix default route bugs (macOS.)
+ * Enable Ping automatically for ZeroTier Adapters (Windows.)
+ * SSO updates and minor bugfixes.
+ * Add low-bandwidth mode.
+ * Add forceTcpRelay mode (optionally enabled.)
+ * Fix bug that prevented setting of custom TCP relay address.
+ * Build script improvements and bug fixes.
+
+# 2022-11-01 -- Version 1.10.2
+
+ * Fix another SSO "stuck client" issue in zeroidc.
+ * Expose root-reported external IP/port information via the local JSON API for better diagnostics.
+ * Multipath: CLI output improvement for inspecting bonds
+ * Multipath: balance-aware mode
+ * Multipath: Custom policies
+ * Multipath: Link quality measurement improvements
+
+Note that releases are coming few and far between because most of our dev effort is going into version 2.
+
+# 2022-06-27 -- Version 1.10.1
+
+ * Fix an issue that could cause SSO clients to get "stuck" on stale auth URLs.
+ * A few other SSO related bug fixes.
+
+# 2022-06-07 -- Version 1.10.0
+
+ * Fix formatting problem in `zerotier-cli` when using SSO networks.
+ * Fix a few other minor bugs in SSO signin to prepare for general availability.
+ * Remove requirement for webview in desktop UI and instead just make everything available via the tray pulldown/menu. Use [libui-ng](https://github.com/libui-ng/libui-ng) for minor prompt dialogs. Saves space and eliminates installation headaches on Windows.
+ * Fix SSO "spam" bug in desktop UI.
+ * Use system default browser for SSO login so all your plugins, MFA devices, password managers, etc. will work as you have them configured.
+ * Minor fix for bonding/multipath.
+
+# 2022-05-10 -- Version 1.8.10
+
+ * Fixed a bug preventing SSO sign-on on Windows.
+
+# 2022-04-25 -- Version 1.8.9
+
+ * Fixed a long-standing and strange bug that was causing sporadic "phantom" packet authentication failures. Not a security problem but could be behind sporadic reports of link failures under some conditions.
+ * Fized a memory leak in SSO/OIDC support.
+ * Fixed SSO/OIDC display error on CLI.
+ * Fixed a bug causing nodes to sometimes fail to push certs to each other (primarily affects SSO/OIDC use cases).
+ * Fixed a deadlock bug on leaving SSO/OIDC managed networks.
+ * Added some new Linux distributions to the build subsystem.
+
+# 2022-04-11 -- Version 1.8.8
+
+ * Fix a local privilege escalation bug in the Windows installer.
+ * Dependency fix for some Ubuntu versions.
+ * No changes for other platforms. Windows upgrade recommended, everyone else optional.
+
+# 2022-03-30 -- Version 1.8.7
+
+ * Fix for dependency installations in Windows MSI package.
+ * Fix for desktop UI setup when run by a non-super-user.
+ * Bug fix in local OIDC / SSO support for auth0 and other providers.
+ * Other minor fixes for e.g. old Linux distributions.
+
+# 2022-03-04 -- Version 1.8.6
+
+ * Fixed an issue that could cause the UI to be non-responsive if not joined to any networks.
+ * Fix dependency issues in Debian and RedHat packages for some distributions (Fedora, Mint).
+ * Bumped the peer cache serialization version to prevent "coma" issues on upgrade due to changes in path logic behaving badly with old values.
+
+# 2022-02-22 -- Version 1.8.5
+
+ * Plumbing under the hood for endpoint device SSO support.
+ * Fix in LinuxEthernetTap to tap device support on very old (2.6) Linux kernels.
+ * Fix an issue that could cause self-hosted roots ("moons") to fail to assist peers in making direct links. (GitHub issue #1512)
+ * Merge a series of changes by Joseph Henry (of ZeroTier) that should fix some edge cases where ZeroTier would "forget" valid paths.
+ * Minor multipath improvements for automatic path negotiation.
+
+# 2021-11-30 -- Version 1.8.4
+
+ * Fixed an ugly font problem on some older macOS versions.
+ * Fixed a bug that could cause the desktop tray app control panel to stop opening after a while on Windows.
+ * Fixed a possible double "release" in macOS tray app code that crashed on older macOS versions.
+ * Fixed installation on 32-bit Windows 10.
+ * Fixed a build flags issue that could cause ZeroTier to crash on older ARM32 CPUs.
+
+# 2021-11-15 -- Version 1.8.3
+
+ * Remove problematic spinlock, which was only used on x86_64 anyway. Just use pthread always.
+ * Fix fd leak on MacOS that caused non-responsiveness after some time.
+ * Fix Debian install scripts to set /usr/sbin/nologin as shell on service user.
+ * Fix regression that could prevent managed routes from being deleted.
+ * DesktopUI: Remove NSDate:now() call, now works on MacOS 10.13 or newer!
+
+# 2021-11-08 -- Version 1.8.2
+
+ * Fix multicast on linux.
+ * Fix a bug that could cause the tap adapter to have the wrong MAC on Linux.
+ * Update build flags to possibly support MacOS older than 10.14, but more work needs to be done. It may not work yet.
+ * Fix path variable setting on Windows.
+
+# 2021-10-28 -- Version 1.8.1
+
+ * Fix numerous UI issues from 1.8.0 (never fully released).
+ * Remove support for REALLY ancient 1.1.6 or earlier network controllers.
+ * MacOS IPv6 no longer binds to temporary addresses as these can cause interruptions if they expire.
+ * Added additional hardening against address impersonation on networks (also in 1.6.6).
+ * Fix an issue that could cause clobbering of MacOS IP route settings on restart.
+
+ * NOTE: Windows 7 is no longer supported! Windows 7 users will have to use version 1.6.5 or earlier.
+
+# 2021-09-15 -- Version 1.8.0 (preview release only)
+
+ * A *completely* rewritten desktop UI for Mac and Windows!
+ * Implement a workaround for one potential source of a "coma" bug, which can occur if buggy NATs/routers stop allowing the service to communicate on a given port. ZeroTier now reassigns a new secondary port if it's offline for a while unless a secondary port is manually specified in local.conf. Working around crummy buggy routers is an ongoing effort.
+ * Fix for MacOS MTU capping issue on feth devices
+ * Fix for mistakenly using v6 source addresses for v4 routes on some platforms
+ * Stop binding to temporary IPv6 addresses
+ * Set MAC address before bringing up Linux TAP link
+ * Check if DNS servers need to be applied on macOS
+ * Upgrade json.hpp dependency to version 3.10.2
+
+# 2021-09-21 -- Version 1.6.6
+
+ * Backport COM hash check mitigation against network member impersonation.
+
+# 2021-04-13 -- Version 1.6.5
+
+ * Fix a bug in potential network path filtering that could in some circumstances lead to "software laser" effects.
+ * Fix a printf overflow in zerotier-cli (not exploitable or a security risk)
+ * Windows now looks up the name of ZeroTier devices instead of relying on them having "ZeroTier" in them.
+
 # 2021-02-15 -- Version 1.6.4
 
  * The groundhog saw his shadow, which meant that the "connection coma" bug still wasn't gone. We think we found it this time.

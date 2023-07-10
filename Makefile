@@ -17,8 +17,8 @@ ifeq ($(OSTYPE),FreeBSD)
 	include make-bsd.mk
 endif
 ifeq ($(OSTYPE),OpenBSD)
-	CC=egcc
-	CXX=eg++
+	CC=clang
+	CXX=clang++
 	ZT_BUILD_PLATFORM=9
 	include make-bsd.mk
 endif
@@ -26,3 +26,8 @@ endif
 ifeq ($(OSTYPE),NetBSD)
 	include make-netbsd.mk
 endif
+
+drone:
+	@echo "rendering .drone.yaml from .drone.jsonnet"
+	drone jsonnet --format --stream
+	drone sign zerotier/ZeroTierOne --save

@@ -71,11 +71,16 @@ public:
 			return;
 		}
 		const unsigned char *b = (const unsigned char *)bits;
-		_m =  ((((uint64_t)*b) & 0xff) << 40); ++b;
-		_m |= ((((uint64_t)*b) & 0xff) << 32); ++b;
-		_m |= ((((uint64_t)*b) & 0xff) << 24); ++b;
-		_m |= ((((uint64_t)*b) & 0xff) << 16); ++b;
-		_m |= ((((uint64_t)*b) & 0xff) << 8); ++b;
+		_m =  ((((uint64_t)*b) & 0xff) << 40);
+		++b;
+		_m |= ((((uint64_t)*b) & 0xff) << 32);
+		++b;
+		_m |= ((((uint64_t)*b) & 0xff) << 24);
+		++b;
+		_m |= ((((uint64_t)*b) & 0xff) << 16);
+		++b;
+		_m |= ((((uint64_t)*b) & 0xff) << 8);
+		++b;
 		_m |= (((uint64_t)*b) & 0xff);
 	}
 
@@ -85,8 +90,9 @@ public:
 	 */
 	inline void copyTo(void *buf,unsigned int len) const
 	{
-		if (len < 6)
+		if (len < 6) {
 			return;
+		}
 		unsigned char *b = (unsigned char *)buf;
 		*(b++) = (unsigned char)((_m >> 40) & 0xff);
 		*(b++) = (unsigned char)((_m >> 32) & 0xff);
@@ -149,7 +155,7 @@ public:
 	/**
 	 * Get the ZeroTier address for this MAC on this network (assuming no bridging of course, basic unicast)
 	 *
-	 * This just XORs the next-lest-significant 5 bytes of the network ID again to unmask.
+	 * This just XORs the next-least-significant 5 bytes of the network ID again to unmask.
 	 *
 	 * @param nwid Network ID
 	 */

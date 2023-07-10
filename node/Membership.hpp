@@ -64,13 +64,9 @@ public:
 	 */
 	void pushCredentials(const RuntimeEnvironment *RR,void *tPtr,const int64_t now,const Address &peerAddress,const NetworkConfig &nconf);
 
-	/**
-	 * @return True if we haven't pushed credentials in a long time (to cause proactive credential push)
-	 */
-	inline bool shouldPushCredentials(const int64_t now) const
-	{
-		return ((now - _lastPushedCredentials) > ZT_PEER_ACTIVITY_TIMEOUT);
-	}
+	inline int64_t lastPushedCredentials() { return _lastPushedCredentials; }
+	inline int64_t comTimestamp() { return _com.timestamp(); }
+	inline int64_t comRevocationThreshold() { return _comRevocationThreshold; }
 
 	/**
 	 * Check whether we should push MULTICAST_LIKEs to this peer, and update last sent time if true
@@ -91,13 +87,12 @@ public:
 	 * Check whether the peer represented by this Membership should be allowed on this network at all
 	 *
 	 * @param nconf Our network config
+	 * @param otherNodeIdentity Identity of remote node
 	 * @return True if this peer is allowed on this network at all
 	 */
-	inline bool isAllowedOnNetwork(const NetworkConfig &nconf) const
+	inline bool isAllowedOnNetwork(const NetworkConfig &thisNodeNetworkConfig, const Identity &otherNodeIdentity) const
 	{
-		if (nconf.isPublic()) return true;
-		if (_com.timestamp() <= _comRevocationThreshold) return false;
-		return nconf.com.agreesWith(_com);
+		return thisNodeNetworkConfig.isPublic() || (((_com.timestamp() > _comRevocationThreshold) && (thisNodeNetworkConfig.com.agreesWith(_com, otherNodeIdentity))));
 	}
 
 	inline bool recentlyAssociated(const int64_t now) const
@@ -120,8 +115,9 @@ public:
 		CertificateOfOwnership *v = (CertificateOfOwnership *)0;
 		Hashtable< uint32_t,CertificateOfOwnership >::Iterator i(*(const_cast< Hashtable< uint32_t,CertificateOfOwnership> *>(&_remoteCoos)));
 		while (i.next(k,v)) {
-			if (_isCredentialTimestampValid(nconf,*v)&&(v->owns(r)))
+			if (_isCredentialTimestampValid(nconf,*v)&&(v->owns(r))) {
 				return true;
+			}
 		}
 		return _isV6NDPEmulated(nconf,r);
 	}
@@ -192,8 +188,9 @@ private:
 							break;
 						}
 					}
-					if (prefixMatches)
+					if (prefixMatches) {
 						return true;
+					}
 					break;
 				}
 			}
@@ -208,8 +205,9 @@ private:
 							break;
 						}
 					}
-					if (prefixMatches)
+					if (prefixMatches) {
 						return true;
+					}
 					break;
 				}
 			}
@@ -235,8 +233,9 @@ private:
 		C *v = (C *)0;
 		typename Hashtable<uint32_t,C>::Iterator i(remoteCreds);
 		while (i.next(k,v)) {
-			if (!_isCredentialTimestampValid(nconf,*v))
+			if (!_isCredentialTimestampValid(nconf,*v)) {
 				remoteCreds.erase(*k);
+			}
 		}
 	}
 
@@ -276,8 +275,9 @@ public:
 		inline Capability *next()
 		{
 			while (_hti.next(_k,_c)) {
-				if (_m._isCredentialTimestampValid(_nconf,*_c))
+				if (_m._isCredentialTimestampValid(_nconf,*_c)) {
 					return _c;
+				}
 			}
 			return (Capability *)0;
 		}

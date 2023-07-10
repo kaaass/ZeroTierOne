@@ -10,6 +10,7 @@ CORE_OBJS=\
 	node/IncomingPacket.o \
 	node/InetAddress.o \
 	node/Membership.o \
+	node/Metrics.o \
 	node/Multicaster.o \
 	node/Network.o \
 	node/NetworkConfig.o \
@@ -28,8 +29,7 @@ CORE_OBJS=\
 	node/Topology.o \
 	node/Trace.o \
 	node/Utils.o \
-	node/Bond.o \
-	node/BondController.o
+	node/Bond.o
 
 ONE_OBJS=\
 	controller/EmbeddedNetworkController.o \

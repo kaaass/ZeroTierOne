@@ -22,12 +22,12 @@
 /**
  * Minor version
  */
-#define ZEROTIER_ONE_VERSION_MINOR 6
+#define ZEROTIER_ONE_VERSION_MINOR 10
 
 /**
  * Revision
  */
-#define ZEROTIER_ONE_VERSION_REVISION 4
+#define ZEROTIER_ONE_VERSION_REVISION 6
 
 /**
  * Build version

@@ -24,7 +24,7 @@
 #if !defined(ZT_AES_NO_ACCEL) && defined(ZT_ARCH_X64)
 #define ZT_AES_AESNI 1
 #endif
-#if !defined(ZT_AES_NO_ACCEL) && defined(ZT_ARCH_ARM_HAS_NEON)
+#if !defined(ZT_AES_NO_ACCEL) && defined(ZT_ARCH_ARM_HAS_NEON) && defined(ZT_ARCH_ARM_HAS_CRYPTO)
 #define ZT_AES_NEON 1
 #endif
 
@@ -197,8 +197,9 @@ public:
 			*reinterpret_cast<uint32_t *>(_iv + 8) = *reinterpret_cast<const uint64_t *>(iv + 8);
 			*reinterpret_cast<uint32_t *>(_iv + 12) = 0x01000000; // 0x00000001 in big-endian byte order
 #else
-			for(int i=0;i<12;++i)
+			for(int i=0;i<12;++i) {
 				_iv[i] = iv[i];
+			}
 			_iv[12] = 0;
 			_iv[13] = 0;
 			_iv[14] = 0;
@@ -373,8 +374,9 @@ public:
 
 			// End of AAD is padded to a multiple of 16 bytes to ensure unique encoding.
 			len &= 0xfU;
-			if (len != 0)
+			if (len != 0) {
 				_gmac.update(Utils::ZERO256, 16 - len);
+			}
 		}
 
 		/**
@@ -495,8 +497,9 @@ public:
 		{
 			_gmac.update(aad, len);
 			len &= 0xfU;
-			if (len != 0)
+			if (len != 0) {
 				_gmac.update(Utils::ZERO256, 16 - len);
+			}
 		}
 
 		/**

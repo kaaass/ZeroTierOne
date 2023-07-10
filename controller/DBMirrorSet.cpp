@@ -15,9 +15,12 @@
 
 namespace ZeroTier {
 
-DBMirrorSet::DBMirrorSet(DB::ChangeListener *listener) :
-	_listener(listener),
-	_running(true)
+DBMirrorSet::DBMirrorSet(DB::ChangeListener *listener)
+	: _listener(listener)
+	, _running(true)
+	, _syncCheckerThread()
+	, _dbs()
+	, _dbs_l()
 {
 	_syncCheckerThread = std::thread([this]() {
 		for(;;) {
@@ -29,14 +32,14 @@ DBMirrorSet::DBMirrorSet(DB::ChangeListener *listener) :
 
 			std::vector< std::shared_ptr<DB> > dbs;
 			{
-				std::lock_guard<std::mutex> l(_dbs_l);
+				std::unique_lock<std::shared_mutex> l(_dbs_l);
 				if (_dbs.size() <= 1)
 					continue; // no need to do this if there's only one DB, so skip the iteration
 				dbs = _dbs;
 			}
 
 			for(auto db=dbs.begin();db!=dbs.end();++db) {
-				(*db)->each([this,&dbs,&db](uint64_t networkId,const nlohmann::json &network,uint64_t memberId,const nlohmann::json &member) {
+				(*db)->each([&dbs,&db](uint64_t networkId,const nlohmann::json &network,uint64_t memberId,const nlohmann::json &member) {
 					try {
 						if (network.is_object()) {
 							if (memberId == 0) {
@@ -76,7 +79,7 @@ DBMirrorSet::~DBMirrorSet()
 
 bool DBMirrorSet::hasNetwork(const uint64_t networkId) const
 {
-	std::lock_guard<std::mutex> l(_dbs_l);
+	std::shared_lock<std::shared_mutex> l(_dbs_l);
 	for(auto d=_dbs.begin();d!=_dbs.end();++d) {
 		if ((*d)->hasNetwork(networkId))
 			return true;
@@ -86,7 +89,7 @@ bool DBMirrorSet::hasNetwork(const uint64_t networkId) const
 
 bool DBMirrorSet::get(const uint64_t networkId,nlohmann::json &network)
 {
-	std::lock_guard<std::mutex> l(_dbs_l);
+	std::shared_lock<std::shared_mutex> l(_dbs_l);
 	for(auto d=_dbs.begin();d!=_dbs.end();++d) {
 		if ((*d)->get(networkId,network)) {
 			return true;
@@ -97,7 +100,7 @@ bool DBMirrorSet::get(const uint64_t networkId,nlohmann::json &network)
 
 bool DBMirrorSet::get(const uint64_t networkId,nlohmann::json &network,const uint64_t memberId,nlohmann::json &member)
 {
-	std::lock_guard<std::mutex> l(_dbs_l);
+	std::shared_lock<std::shared_mutex> l(_dbs_l);
 	for(auto d=_dbs.begin();d!=_dbs.end();++d) {
 		if ((*d)->get(networkId,network,memberId,member))
 			return true;
@@ -107,7 +110,7 @@ bool DBMirrorSet::get(const uint64_t networkId,nlohmann::json &network,const uin
 
 bool DBMirrorSet::get(const uint64_t networkId,nlohmann::json &network,const uint64_t memberId,nlohmann::json &member,DB::NetworkSummaryInfo &info)
 {
-	std::lock_guard<std::mutex> l(_dbs_l);
+	std::shared_lock<std::shared_mutex> l(_dbs_l);
 	for(auto d=_dbs.begin();d!=_dbs.end();++d) {
 		if ((*d)->get(networkId,network,memberId,member,info))
 			return true;
@@ -117,7 +120,7 @@ bool DBMirrorSet::get(const uint64_t networkId,nlohmann::json &network,const uin
 
 bool DBMirrorSet::get(const uint64_t networkId,nlohmann::json &network,std::vector<nlohmann::json> &members)
 {
-	std::lock_guard<std::mutex> l(_dbs_l);
+	std::shared_lock<std::shared_mutex> l(_dbs_l);
 	for(auto d=_dbs.begin();d!=_dbs.end();++d) {
 		if ((*d)->get(networkId,network,members))
 			return true;
@@ -125,9 +128,21 @@ bool DBMirrorSet::get(const uint64_t networkId,nlohmann::json &network,std::vect
 	return false;
 }
 
+AuthInfo DBMirrorSet::getSSOAuthInfo(const nlohmann::json &member, const std::string &redirectURL) 
+{
+	std::shared_lock<std::shared_mutex> l(_dbs_l);
+	for(auto d=_dbs.begin();d!=_dbs.end();++d) { 
+		AuthInfo info = (*d)->getSSOAuthInfo(member, redirectURL);
+		if (info.enabled) {
+			return info;
+		}
+	}
+	return AuthInfo();
+}
+
 void DBMirrorSet::networks(std::set<uint64_t> &networks)
 {
-	std::lock_guard<std::mutex> l(_dbs_l);
+	std::shared_lock<std::shared_mutex> l(_dbs_l);
 	for(auto d=_dbs.begin();d!=_dbs.end();++d) {
 		(*d)->networks(networks);
 	}
@@ -136,7 +151,7 @@ void DBMirrorSet::networks(std::set<uint64_t> &networks)
 bool DBMirrorSet::waitForReady()
 {
 	bool r = false;
-	std::lock_guard<std::mutex> l(_dbs_l);
+	std::shared_lock<std::shared_mutex> l(_dbs_l);
 	for(auto d=_dbs.begin();d!=_dbs.end();++d) {
 		r |= (*d)->waitForReady();
 	}
@@ -145,7 +160,7 @@ bool DBMirrorSet::waitForReady()
 
 bool DBMirrorSet::isReady()
 {
-	std::lock_guard<std::mutex> l(_dbs_l);
+	std::shared_lock<std::shared_mutex> l(_dbs_l);
 	for(auto d=_dbs.begin();d!=_dbs.end();++d) {
 		if (!(*d)->isReady())
 			return false;
@@ -157,7 +172,7 @@ bool DBMirrorSet::save(nlohmann::json &record,bool notifyListeners)
 {
 	std::vector< std::shared_ptr<DB> > dbs;
 	{
-		std::lock_guard<std::mutex> l(_dbs_l);
+		std::unique_lock<std::shared_mutex> l(_dbs_l);
 		dbs = _dbs;
 	}
 	if (notifyListeners) {
@@ -177,7 +192,7 @@ bool DBMirrorSet::save(nlohmann::json &record,bool notifyListeners)
 
 void DBMirrorSet::eraseNetwork(const uint64_t networkId)
 {
-	std::lock_guard<std::mutex> l(_dbs_l);
+	std::unique_lock<std::shared_mutex> l(_dbs_l);
 	for(auto d=_dbs.begin();d!=_dbs.end();++d) {
 		(*d)->eraseNetwork(networkId);
 	}
@@ -185,7 +200,7 @@ void DBMirrorSet::eraseNetwork(const uint64_t networkId)
 
 void DBMirrorSet::eraseMember(const uint64_t networkId,const uint64_t memberId)
 {
-	std::lock_guard<std::mutex> l(_dbs_l);
+	std::unique_lock<std::shared_mutex> l(_dbs_l);
 	for(auto d=_dbs.begin();d!=_dbs.end();++d) {
 		(*d)->eraseMember(networkId,memberId);
 	}
@@ -193,7 +208,7 @@ void DBMirrorSet::eraseMember(const uint64_t networkId,const uint64_t memberId)
 
 void DBMirrorSet::nodeIsOnline(const uint64_t networkId,const uint64_t memberId,const InetAddress &physicalAddress)
 {
-	std::lock_guard<std::mutex> l(_dbs_l);
+	std::shared_lock<std::shared_mutex> l(_dbs_l);
 	for(auto d=_dbs.begin();d!=_dbs.end();++d) {
 		(*d)->nodeIsOnline(networkId,memberId,physicalAddress);
 	}
@@ -202,7 +217,7 @@ void DBMirrorSet::nodeIsOnline(const uint64_t networkId,const uint64_t memberId,
 void DBMirrorSet::onNetworkUpdate(const void *db,uint64_t networkId,const nlohmann::json &network)
 {
 	nlohmann::json record(network);
-	std::lock_guard<std::mutex> l(_dbs_l);
+	std::unique_lock<std::shared_mutex> l(_dbs_l);
 	for(auto d=_dbs.begin();d!=_dbs.end();++d) {
 		if (d->get() != db) {
 			(*d)->save(record,false);
@@ -214,7 +229,7 @@ void DBMirrorSet::onNetworkUpdate(const void *db,uint64_t networkId,const nlohma
 void DBMirrorSet::onNetworkMemberUpdate(const void *db,uint64_t networkId,uint64_t memberId,const nlohmann::json &member)
 {
 	nlohmann::json record(member);
-	std::lock_guard<std::mutex> l(_dbs_l);
+	std::unique_lock<std::shared_mutex> l(_dbs_l);
 	for(auto d=_dbs.begin();d!=_dbs.end();++d) {
 		if (d->get() != db) {
 			(*d)->save(record,false);

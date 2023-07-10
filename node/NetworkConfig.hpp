@@ -41,20 +41,19 @@
 #include "Trace.hpp"
 
 /**
- * Default maximum time delta for COMs, tags, and capabilities
- *
- * The current value is two hours, providing ample time for a controller to
- * experience fail-over, etc.
+ * Default time delta for COMs, tags, and capabilities
  */
-#define ZT_NETWORKCONFIG_DEFAULT_CREDENTIAL_TIME_MAX_MAX_DELTA 7200000ULL
+#define ZT_NETWORKCONFIG_DEFAULT_CREDENTIAL_TIME_DFL_MAX_DELTA ((int64_t)(1000 * 60 * 30))
 
 /**
- * Default minimum credential TTL and maxDelta for COM timestamps
- *
- * This is just slightly over three minutes and provides three retries for
- * all currently online members to refresh.
+ * Maximum time delta for COMs, tags, and capabilities
  */
-#define ZT_NETWORKCONFIG_DEFAULT_CREDENTIAL_TIME_MIN_MAX_DELTA 185000ULL
+#define ZT_NETWORKCONFIG_DEFAULT_CREDENTIAL_TIME_MAX_MAX_DELTA ((int64_t)(1000 * 60 * 60 * 2))
+
+/**
+ * Minimum credential TTL and maxDelta for COM timestamps
+ */
+#define ZT_NETWORKCONFIG_DEFAULT_CREDENTIAL_TIME_MIN_MAX_DELTA ((int64_t)(1000 * 60 * 5))
 
 /**
  * Flag: enable broadcast
@@ -94,7 +93,7 @@
 namespace ZeroTier {
 
 // Dictionary capacity needed for max size network config
-#define ZT_NETWORKCONFIG_DICT_CAPACITY (1024 + (sizeof(ZT_VirtualNetworkRule) * ZT_MAX_NETWORK_RULES) + (sizeof(Capability) * ZT_MAX_NETWORK_CAPABILITIES) + (sizeof(Tag) * ZT_MAX_NETWORK_TAGS) + (sizeof(CertificateOfOwnership) * ZT_MAX_CERTIFICATES_OF_OWNERSHIP))
+#define ZT_NETWORKCONFIG_DICT_CAPACITY (4096 + (sizeof(ZT_VirtualNetworkConfig)) + (sizeof(ZT_VirtualNetworkRule) * ZT_MAX_NETWORK_RULES) + (sizeof(Capability) * ZT_MAX_NETWORK_CAPABILITIES) + (sizeof(Tag) * ZT_MAX_NETWORK_TAGS) + (sizeof(CertificateOfOwnership) * ZT_MAX_CERTIFICATES_OF_OWNERSHIP))
 
 // Dictionary capacity needed for max size network meta-data
 #define ZT_NETWORKCONFIG_METADATA_DICT_CAPACITY 1024
@@ -178,6 +177,45 @@ namespace ZeroTier {
 #define ZT_NETWORKCONFIG_DICT_KEY_CERTIFICATES_OF_OWNERSHIP "COO"
 // dns (binary blobs)
 #define ZT_NETWORKCONFIG_DICT_KEY_DNS "DNS"
+// sso enabled
+#define ZT_NETWORKCONFIG_DICT_KEY_SSO_ENABLED "ssoe"
+// so version
+#define ZT_NETWORKCONFIG_DICT_KEY_SSO_VERSION "ssov"
+// authentication URL
+#define ZT_NETWORKCONFIG_DICT_KEY_AUTHENTICATION_URL "aurl"
+// authentication expiry
+#define ZT_NETWORKCONFIG_DICT_KEY_AUTHENTICATION_EXPIRY_TIME "aexpt"
+// oidc issuer URL
+#define ZT_NETWORKCONFIG_DICT_KEY_ISSUER_URL "iurl"
+// central endpoint
+#define ZT_NETWORKCONFIG_DICT_KEY_CENTRAL_ENDPOINT_URL "ssoce"
+// nonce
+#define ZT_NETWORKCONFIG_DICT_KEY_NONCE "sson"
+// state
+#define ZT_NETWORKCONFIG_DICT_KEY_STATE "ssos"
+// client ID
+#define ZT_NETWORKCONFIG_DICT_KEY_CLIENT_ID "ssocid"
+// SSO Provider
+#define ZT_NETWORKCONFIG_DICT_KEY_SSO_PROVIDER "ssop"
+
+// AuthInfo fields -- used by ncSendError for sso
+
+// AuthInfo Version
+#define ZT_AUTHINFO_DICT_KEY_VERSION "aV"
+// authentication URL
+#define ZT_AUTHINFO_DICT_KEY_AUTHENTICATION_URL "aU"
+// issuer URL
+#define ZT_AUTHINFO_DICT_KEY_ISSUER_URL "iU"
+// Central endpoint URL
+#define ZT_AUTHINFO_DICT_KEY_CENTRAL_ENDPOINT_URL "aCU"
+// Nonce
+#define ZT_AUTHINFO_DICT_KEY_NONCE "aN"
+// State
+#define ZT_AUTHINFO_DICT_KEY_STATE "aS"
+// Client ID
+#define ZT_AUTHINFO_DICT_KEY_CLIENT_ID "aCID"
+// SSO Provider
+#define ZT_AUTHINFO_DICT_KEY_SSO_PROVIDER "aSSOp"
 
 // Legacy fields -- these are obsoleted but are included when older clients query
 
@@ -233,7 +271,15 @@ public:
 		tags(),
 		certificatesOfOwnership(),
 		type(ZT_NETWORK_TYPE_PRIVATE),
-		dnsCount(0)
+		dnsCount(0),
+		ssoEnabled(false),
+		authenticationURL(),
+		authenticationExpiryTime(0),
+		issuerURL(),
+		centralAuthURL(),
+		ssoNonce(),
+		ssoState(),
+		ssoClientID()
 	{
 		name[0] = 0;
 		memset(specialists, 0, sizeof(uint64_t)*ZT_MAX_NETWORK_SPECIALISTS);
@@ -241,6 +287,13 @@ public:
 		memset(staticIps, 0, sizeof(InetAddress)*ZT_MAX_ZT_ASSIGNED_ADDRESSES);
 		memset(rules, 0, sizeof(ZT_VirtualNetworkRule)*ZT_MAX_NETWORK_RULES);
 		memset(&dns, 0, sizeof(ZT_VirtualNetworkDNS));
+		memset(authenticationURL, 0, sizeof(authenticationURL));
+		memset(issuerURL, 0, sizeof(issuerURL));
+		memset(centralAuthURL, 0, sizeof(centralAuthURL));
+		memset(ssoNonce, 0, sizeof(ssoNonce));
+		memset(ssoState, 0, sizeof(ssoState));
+		memset(ssoClientID, 0, sizeof(ssoClientID));
+		strncpy(ssoProvider, "default", sizeof(ssoProvider));
 	}
 
 	/**
@@ -303,8 +356,9 @@ public:
 	{
 		std::vector<Address> r;
 		for(unsigned int i=0;i<specialistCount;++i) {
-			if ((specialists[i] & ZT_NETWORKCONFIG_SPECIALIST_TYPE_ACTIVE_BRIDGE) != 0)
+			if ((specialists[i] & ZT_NETWORKCONFIG_SPECIALIST_TYPE_ACTIVE_BRIDGE) != 0) {
 				r.push_back(Address(specialists[i]));
+			}
 		}
 		return r;
 	}
@@ -313,8 +367,9 @@ public:
 	{
 		unsigned int c = 0;
 		for(unsigned int i=0;i<specialistCount;++i) {
-			if ((specialists[i] & ZT_NETWORKCONFIG_SPECIALIST_TYPE_ACTIVE_BRIDGE) != 0)
+			if ((specialists[i] & ZT_NETWORKCONFIG_SPECIALIST_TYPE_ACTIVE_BRIDGE) != 0) {
 				ab[c++] = specialists[i];
+			}
 		}
 		return c;
 	}
@@ -322,8 +377,9 @@ public:
 	inline bool isActiveBridge(const Address &a) const
 	{
 		for(unsigned int i=0;i<specialistCount;++i) {
-			if (((specialists[i] & ZT_NETWORKCONFIG_SPECIALIST_TYPE_ACTIVE_BRIDGE) != 0)&&(a == specialists[i]))
+			if (((specialists[i] & ZT_NETWORKCONFIG_SPECIALIST_TYPE_ACTIVE_BRIDGE) != 0)&&(a == specialists[i])) {
 				return true;
+			}
 		}
 		return false;
 	}
@@ -332,8 +388,9 @@ public:
 	{
 		std::vector<Address> r;
 		for(unsigned int i=0;i<specialistCount;++i) {
-			if ((specialists[i] & ZT_NETWORKCONFIG_SPECIALIST_TYPE_ANCHOR) != 0)
+			if ((specialists[i] & ZT_NETWORKCONFIG_SPECIALIST_TYPE_ANCHOR) != 0) {
 				r.push_back(Address(specialists[i]));
+			}
 		}
 		return r;
 	}
@@ -342,8 +399,9 @@ public:
 	{
 		std::vector<Address> r;
 		for(unsigned int i=0;i<specialistCount;++i) {
-			if ((specialists[i] & ZT_NETWORKCONFIG_SPECIALIST_TYPE_MULTICAST_REPLICATOR) != 0)
+			if ((specialists[i] & ZT_NETWORKCONFIG_SPECIALIST_TYPE_MULTICAST_REPLICATOR) != 0) {
 				r.push_back(Address(specialists[i]));
+			}
 		}
 		return r;
 	}
@@ -352,8 +410,9 @@ public:
 	{
 		unsigned int c = 0;
 		for(unsigned int i=0;i<specialistCount;++i) {
-			if ((specialists[i] & ZT_NETWORKCONFIG_SPECIALIST_TYPE_MULTICAST_REPLICATOR) != 0)
+			if ((specialists[i] & ZT_NETWORKCONFIG_SPECIALIST_TYPE_MULTICAST_REPLICATOR) != 0) {
 				mr[c++] = specialists[i];
+			}
 		}
 		return c;
 	}
@@ -361,8 +420,9 @@ public:
 	inline bool isMulticastReplicator(const Address &a) const
 	{
 		for(unsigned int i=0;i<specialistCount;++i) {
-			if (((specialists[i] & ZT_NETWORKCONFIG_SPECIALIST_TYPE_MULTICAST_REPLICATOR) != 0)&&(a == specialists[i]))
+			if (((specialists[i] & ZT_NETWORKCONFIG_SPECIALIST_TYPE_MULTICAST_REPLICATOR) != 0)&&(a == specialists[i])) {
 				return true;
+			}
 		}
 		return false;
 	}
@@ -371,8 +431,9 @@ public:
 	{
 		std::vector<Address> r;
 		for(unsigned int i=0;i<specialistCount;++i) {
-			if ((specialists[i] & (ZT_NETWORKCONFIG_SPECIALIST_TYPE_ANCHOR | ZT_NETWORKCONFIG_SPECIALIST_TYPE_MULTICAST_REPLICATOR)) != 0)
+			if ((specialists[i] & (ZT_NETWORKCONFIG_SPECIALIST_TYPE_ANCHOR | ZT_NETWORKCONFIG_SPECIALIST_TYPE_MULTICAST_REPLICATOR)) != 0) {
 				r.push_back(Address(specialists[i]));
+			}
 		}
 		return r;
 	}
@@ -381,8 +442,9 @@ public:
 	{
 		unsigned int c = 0;
 		for(unsigned int i=0;i<specialistCount;++i) {
-			if ((specialists[i] & (ZT_NETWORKCONFIG_SPECIALIST_TYPE_ANCHOR | ZT_NETWORKCONFIG_SPECIALIST_TYPE_MULTICAST_REPLICATOR)) != 0)
+			if ((specialists[i] & (ZT_NETWORKCONFIG_SPECIALIST_TYPE_ANCHOR | ZT_NETWORKCONFIG_SPECIALIST_TYPE_MULTICAST_REPLICATOR)) != 0) {
 				ac[c++] = specialists[i];
+			}
 		}
 		return c;
 	}
@@ -403,8 +465,9 @@ public:
 	inline bool permitsBridging(const Address &fromPeer) const
 	{
 		for(unsigned int i=0;i<specialistCount;++i) {
-			if ((fromPeer == specialists[i])&&((specialists[i] & ZT_NETWORKCONFIG_SPECIALIST_TYPE_ACTIVE_BRIDGE) != 0))
+			if ((fromPeer == specialists[i])&&((specialists[i] & ZT_NETWORKCONFIG_SPECIALIST_TYPE_ACTIVE_BRIDGE) != 0)) {
 				return true;
+			}
 		}
 		return false;
 	}
@@ -442,8 +505,9 @@ public:
 	const Capability *capability(const uint32_t id) const
 	{
 		for(unsigned int i=0;i<capabilityCount;++i) {
-			if (capabilities[i].id() == id)
+			if (capabilities[i].id() == id) {
 				return &(capabilities[i]);
+			}
 		}
 		return (Capability *)0;
 	}
@@ -451,8 +515,9 @@ public:
 	const Tag *tag(const uint32_t id) const
 	{
 		for(unsigned int i=0;i<tagCount;++i) {
-			if (tags[i].id() == id)
+			if (tags[i].id() == id) {
 				return &(tags[i]);
+			}
 		}
 		return (Tag *)0;
 	}
@@ -604,6 +669,62 @@ public:
 	 * ZT pushed DNS configuration
 	 */
 	ZT_VirtualNetworkDNS dns;
+
+	/**
+	 * SSO enabled flag.
+	 */
+	bool ssoEnabled;
+
+	/**
+	 * SSO version
+	 */
+	uint64_t ssoVersion;
+
+	/**
+	 * Authentication URL if authentication is required
+	 */
+	char authenticationURL[2048];
+
+	/**
+	 * Time current authentication expires or 0 if external authentication is disabled
+	 * 
+	 * Not used if authVersion >= 1
+	 */
+	uint64_t authenticationExpiryTime;
+
+	/**
+	 * OIDC issuer URL
+	 */
+	char issuerURL[2048];
+
+	/**
+	 * central base URL.
+	 */
+	char centralAuthURL[2048];
+
+	/**
+	 * sso nonce
+	 */
+	char ssoNonce[128];
+
+	/**
+	 * sso state
+	 */
+	char ssoState[256];
+
+	/**
+	 * oidc client id
+	 */
+	char ssoClientID[256];
+
+	/**
+	 * oidc provider
+	 *
+	 * because certain providers require specific scopes to be requested
+	 * and others to be not requested in order to make everything work
+	 * correctly
+	 **/
+	char ssoProvider[64];
 };
 
 } // namespace ZeroTier

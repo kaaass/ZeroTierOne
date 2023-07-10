@@ -26,7 +26,6 @@
 #include <mutex>
 #include "../node/MulticastGroup.hpp"
 #include "EthernetTap.hpp"
-#include "BlockingQueue.hpp"
 
 namespace ZeroTier {
 
@@ -58,6 +57,9 @@ public:
 	virtual void setMtu(unsigned int mtu);
 	virtual void setDns(const char *domain, const std::vector<InetAddress> &servers) {}
 
+
+
+
 private:
 	void (*_handler)(void *,void *,uint64_t,const MAC &,const MAC &,unsigned int,unsigned int,const void *,unsigned int);
 	void *_arg;
@@ -71,12 +73,9 @@ private:
 	int _shutdownSignalPipe[2];
 	std::atomic_bool _enabled;
 	std::atomic_bool _run;
-	std::thread _tapReaderThread[2];
-	std::thread _tapProcessorThread;
-	std::mutex _buffers_l;
-	std::mutex _thread_init_l;
-	std::vector<void *> _buffers;
-	BlockingQueue< std::pair<void *,int> > _tapq;
+	std::thread _tapReaderThread;
+	mutable std::vector<InetAddress> _ifaddrs;
+	mutable uint64_t _lastIfAddrsUpdate;
 };
 
 } // namespace ZeroTier

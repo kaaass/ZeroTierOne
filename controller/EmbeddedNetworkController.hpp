@@ -35,7 +35,9 @@
 #include "../osdep/Thread.hpp"
 #include "../osdep/BlockingQueue.hpp"
 
-#include "../ext/json/json.hpp"
+#include <nlohmann/json.hpp>
+
+#include <cpp-httplib/httplib.h>
 
 #include "DB.hpp"
 #include "DBMirrorSet.hpp"
@@ -57,6 +59,8 @@ public:
 
 	virtual void init(const Identity &signingId,Sender *sender);
 
+	void setSSORedirectURL(const std::string &url);
+
 	virtual void request(
 		uint64_t nwid,
 		const InetAddress &fromAddr,
@@ -64,27 +68,9 @@ public:
 		const Identity &identity,
 		const Dictionary<ZT_NETWORKCONFIG_METADATA_DICT_CAPACITY> &metaData);
 
-	unsigned int handleControlPlaneHttpGET(
-		const std::vector<std::string> &path,
-		const std::map<std::string,std::string> &urlArgs,
-		const std::map<std::string,std::string> &headers,
-		const std::string &body,
-		std::string &responseBody,
-		std::string &responseContentType);
-	unsigned int handleControlPlaneHttpPOST(
-		const std::vector<std::string> &path,
-		const std::map<std::string,std::string> &urlArgs,
-		const std::map<std::string,std::string> &headers,
-		const std::string &body,
-		std::string &responseBody,
-		std::string &responseContentType);
-	unsigned int handleControlPlaneHttpDELETE(
-		const std::vector<std::string> &path,
-		const std::map<std::string,std::string> &urlArgs,
-		const std::map<std::string,std::string> &headers,
-		const std::string &body,
-		std::string &responseBody,
-		std::string &responseContentType);
+	void configureHTTPControlPlane(
+		httplib::Server &s,
+		const std::function<void(const httplib::Request&, httplib::Response&, std::string)>);
 
 	void handleRemoteTrace(const ZT_RemoteTrace &rt);
 
@@ -95,6 +81,9 @@ public:
 private:
 	void _request(uint64_t nwid,const InetAddress &fromAddr,uint64_t requestPacketId,const Identity &identity,const Dictionary<ZT_NETWORKCONFIG_METADATA_DICT_CAPACITY> &metaData);
 	void _startThreads();
+	void _ssoExpiryThread();
+
+	std::string networkUpdateFromPostData(uint64_t networkID, const std::string &body);
 
 	struct _RQEntry
 	{
@@ -107,6 +96,7 @@ private:
 			RQENTRY_TYPE_REQUEST = 0
 		} type;
 	};
+
 	struct _MemberStatusKey
 	{
 		_MemberStatusKey() : networkId(0),nodeId(0) {}
@@ -114,11 +104,13 @@ private:
 		uint64_t networkId;
 		uint64_t nodeId;
 		inline bool operator==(const _MemberStatusKey &k) const { return ((k.networkId == networkId)&&(k.nodeId == nodeId)); }
+		inline bool operator<(const _MemberStatusKey &k) const { return (k.networkId < networkId) || ((k.networkId == networkId)&&(k.nodeId < nodeId)); }
 	};
 	struct _MemberStatus
 	{
-		_MemberStatus() : lastRequestTime(0),vMajor(-1),vMinor(-1),vRev(-1),vProto(-1) {}
-		uint64_t lastRequestTime;
+		_MemberStatus() : lastRequestTime(0),authenticationExpiryTime(-1),vMajor(-1),vMinor(-1),vRev(-1),vProto(-1) {}
+		int64_t lastRequestTime;
+		int64_t authenticationExpiryTime;
 		int vMajor,vMinor,vRev,vProto;
 		Dictionary<ZT_NETWORKCONFIG_METADATA_DICT_CAPACITY> lastRequestMetaData;
 		Identity identity;
@@ -150,7 +142,39 @@ private:
 	std::unordered_map< _MemberStatusKey,_MemberStatus,_MemberStatusHash > _memberStatus;
 	std::mutex _memberStatus_l;
 
+	std::set< std::pair<int64_t, _MemberStatusKey> > _expiringSoon;
+	std::mutex _expiringSoon_l;
+
 	RedisConfig *_rc;
+	std::string _ssoRedirectURL;
+
+	bool _ssoExpiryRunning;
+	std::thread _ssoExpiry;
+
+#ifdef CENTRAL_CONTROLLER_REQUEST_BENCHMARK
+	prometheus::simpleapi::benchmark_family_t _member_status_lookup;
+	prometheus::simpleapi::counter_family_t   _member_status_lookup_count;
+	prometheus::simpleapi::benchmark_family_t _node_is_online;
+	prometheus::simpleapi::counter_family_t   _node_is_online_count;
+	prometheus::simpleapi::benchmark_family_t _get_and_init_member;
+	prometheus::simpleapi::counter_family_t   _get_and_init_member_count;
+	prometheus::simpleapi::benchmark_family_t _have_identity;
+	prometheus::simpleapi::counter_family_t   _have_identity_count;
+	prometheus::simpleapi::benchmark_family_t _determine_auth;
+	prometheus::simpleapi::counter_family_t   _determine_auth_count;
+	prometheus::simpleapi::benchmark_family_t _sso_check;
+	prometheus::simpleapi::counter_family_t   _sso_check_count;
+	prometheus::simpleapi::benchmark_family_t _auth_check;
+	prometheus::simpleapi::counter_family_t   _auth_check_count;
+	prometheus::simpleapi::benchmark_family_t _json_schlep;
+	prometheus::simpleapi::counter_family_t   _json_schlep_count;
+	prometheus::simpleapi::benchmark_family_t _issue_certificate;
+	prometheus::simpleapi::counter_family_t   _issue_certificate_count;
+	prometheus::simpleapi::benchmark_family_t _save_member;
+	prometheus::simpleapi::counter_family_t   _save_member_count;
+	prometheus::simpleapi::benchmark_family_t _send_netconf;
+	prometheus::simpleapi::counter_family_t   _send_netconf_count;
+#endif
 };
 
 } // namespace ZeroTier

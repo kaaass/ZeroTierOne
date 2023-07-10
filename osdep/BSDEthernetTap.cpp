@@ -74,7 +74,8 @@ BSDEthernetTap::BSDEthernetTap(
 	_mtu(mtu),
 	_metric(metric),
 	_fd(0),
-	_enabled(true)
+	_enabled(true),
+	_lastIfAddrsUpdate(0)
 {
 	static Mutex globalTapCreateLock;
 	char devpath[64],ethaddr[64],mtustr[32],metstr[32],tmpdevname[32];
@@ -106,6 +107,9 @@ BSDEthernetTap::BSDEthernetTap(
 		if (std::find(devFiles.begin(),devFiles.end(),std::string(tmpdevname)) == devFiles.end()) {
 			long cpid = (long)vfork();
 			if (cpid == 0) {
+#ifdef ZT_TRACE
+				fprintf(stderr, "DEBUG: ifconfig %s create" ZT_EOL_S, tmpdevname);
+#endif
 				::execl("/sbin/ifconfig","/sbin/ifconfig",tmpdevname,"create",(const char *)0);
 				::_exit(-1);
 			} else if (cpid > 0) {
@@ -117,6 +121,9 @@ BSDEthernetTap::BSDEthernetTap(
 			if (!stat(devpath,&stattmp)) {
 				cpid = (long)vfork();
 				if (cpid == 0) {
+#ifdef ZT_TRACE
+					fprintf(stderr, "DEBUG: ifconfig %s name %s" ZT_EOL_S, tmpdevname, _dev.c_str());
+#endif
 					::execl("/sbin/ifconfig","/sbin/ifconfig",tmpdevname,"name",_dev.c_str(),(const char *)0);
 					::_exit(-1);
 				} else if (cpid > 0) {
@@ -163,6 +170,9 @@ BSDEthernetTap::BSDEthernetTap(
 	OSUtils::ztsnprintf(metstr,sizeof(metstr),"%u",_metric);
 	long cpid = (long)vfork();
 	if (cpid == 0) {
+#ifdef ZT_TRACE
+		fprintf(stderr, "DEBUG: ifconfig %s lladdr %s mtu %s metric %s up" ZT_EOL_S, _dev.c_str(), ethaddr, mtustr, metstr);
+#endif
 		::execl("/sbin/ifconfig","/sbin/ifconfig",_dev.c_str(),"lladdr",ethaddr,"mtu",mtustr,"metric",metstr,"up",(const char *)0);
 		::_exit(-1);
 	} else if (cpid > 0) {
@@ -192,6 +202,9 @@ BSDEthernetTap::~BSDEthernetTap()
 
 	long cpid = (long)vfork();
 	if (cpid == 0) {
+#ifdef ZT_TRACE
+			fprintf(stderr, "DEBUG: ifconfig %s destroy" ZT_EOL_S, _dev.c_str());
+#endif
 		::execl("/sbin/ifconfig","/sbin/ifconfig",_dev.c_str(),"destroy",(const char *)0);
 		::_exit(-1);
 	} else if (cpid > 0) {
@@ -215,6 +228,9 @@ static bool ___removeIp(const std::string &_dev,const InetAddress &ip)
 	long cpid = (long)vfork();
 	if (cpid == 0) {
 		char ipbuf[64];
+#ifdef ZT_TRACE
+		fprintf(stderr, "DEBUG: ifconfig %s inet %s -alias" ZT_EOL_S, _dev.c_str(), ip.toIpString(ipbuf));
+#endif
 		execl("/sbin/ifconfig","/sbin/ifconfig",_dev.c_str(),"inet",ip.toIpString(ipbuf),"-alias",(const char *)0);
 		_exit(-1);
 	} else if (cpid > 0) {
@@ -245,6 +261,9 @@ bool BSDEthernetTap::addIp(const InetAddress &ip)
 	long cpid = (long)vfork();
 	if (cpid == 0) {
 		char tmp[128];
+#ifdef ZT_TRACE
+		fprintf(stderr, "DEBUG: ifconfig %s %s %s alias" ZT_EOL_S, _dev.c_str(), ip.isV4() ? "inet" : "inet6", ip.toString(tmp));
+#endif
 		::execl("/sbin/ifconfig","/sbin/ifconfig",_dev.c_str(),ip.isV4() ? "inet" : "inet6",ip.toString(tmp),"alias",(const char *)0);
 		::_exit(-1);
 	} else if (cpid > 0) {
@@ -269,6 +288,13 @@ bool BSDEthernetTap::removeIp(const InetAddress &ip)
 
 std::vector<InetAddress> BSDEthernetTap::ips() const
 {
+	uint64_t now = OSUtils::now();
+
+	if ((now - _lastIfAddrsUpdate) <= GETIFADDRS_CACHE_TIME) {
+		return _ifaddrs;
+	}
+	_lastIfAddrsUpdate = now;
+
 	struct ifaddrs *ifa = (struct ifaddrs *)0;
 	if (getifaddrs(&ifa))
 		return std::vector<InetAddress>();
@@ -301,6 +327,8 @@ std::vector<InetAddress> BSDEthernetTap::ips() const
 
 	std::sort(r.begin(),r.end());
 	std::unique(r.begin(),r.end());
+
+	_ifaddrs = r;
 
 	return r;
 }
@@ -375,6 +403,9 @@ void BSDEthernetTap::setMtu(unsigned int mtu)
 		if (cpid == 0) {
 			char tmp[64];
 			OSUtils::ztsnprintf(tmp,sizeof(tmp),"%u",mtu);
+#ifdef ZT_TRACE
+			fprintf(stderr, "DEBUG: ifconfig %s mtu %s" ZT_EOL_S, _dev.c_str(), tmp);
+#endif
 			execl("/sbin/ifconfig","/sbin/ifconfig",_dev.c_str(),"mtu",tmp,(const char *)0);
 			_exit(-1);
 		} else if (cpid > 0) {

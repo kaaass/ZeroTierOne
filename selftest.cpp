@@ -255,6 +255,35 @@ static int testCrypto()
 		::free((void *)bb);
 	}
 
+	/*
+	{
+		AES k0,k1;
+		k0.init("00000000000000000000000000000000");
+		k1.init("11111111111111111111111111111111");
+		uint8_t test_pt[65536];
+		uint8_t test_ct[65536];
+		uint8_t test_aad[65536];
+		uint8_t ct_hash[48];
+		char hex_tmp[128];
+		for(unsigned int i=0;i<65536;++i) {
+			test_pt[i] = (uint8_t)i;
+			test_aad[i] = (uint8_t)i;
+		}
+		AES::GMACSIVEncryptor enc(k0,k1);
+		for(unsigned int test_length=0;test_length<65536;test_length+=777) {
+			memset(test_ct, 0, test_length);
+			enc.init((uint64_t)test_length, test_ct);
+			enc.aad(test_aad, test_length);
+			enc.update1(test_pt, test_length);
+			enc.finish1();
+			enc.update2(test_pt, test_length);
+			const void *tag = enc.finish2();
+			SHA384(ct_hash, test_ct, test_length);
+			std::cout << "(" << test_length << ", \"" << Utils::hex(ct_hash, 48, hex_tmp) << "\", \"" << Utils::hex(tag, 16, hex_tmp) << "\")," <<std::endl;
+		}
+	}
+	*/
+
 	std::cout << "[crypto] Benchmarking AES-GMAC-SIV... "; std::cout.flush();
 	{
 		uint64_t end,start = OSUtils::now();
@@ -371,7 +400,7 @@ static int testCrypto()
 		C25519::agree(p1,p2.pub,buf1,64);
 		C25519::agree(p2,p1.pub,buf2,64);
 		C25519::agree(p3,p1.pub,buf3,64);
-		// p1<>p2 should equal p1<>p2
+		// p1<>p2 should equal p2<>p1
 		if (memcmp(buf1,buf2,64)) {
 			std::cout << "FAIL (1)" << std::endl;
 			return -1;
@@ -561,8 +590,8 @@ static int testCertificate()
 	std::cout << idA.address().toString(buf) << ", " << idB.address().toString(buf) << std::endl;
 
 	std::cout << "[certificate] Generating certificates A and B...";
-	CertificateOfMembership cA(10000,100,1,idA.address());
-	CertificateOfMembership cB(10099,100,1,idB.address());
+	CertificateOfMembership cA(10000,100,1,idA);
+	CertificateOfMembership cB(10099,100,1,idB);
 	std::cout << std::endl;
 
 	std::cout << "[certificate] Signing certificates A and B with authority...";
@@ -574,13 +603,13 @@ static int testCertificate()
 	//std::cout << "[certificate] B: " << cB.toString() << std::endl;
 
 	std::cout << "[certificate] A agrees with B and B with A... ";
-	if (cA.agreesWith(cB))
+	if (cA.agreesWith(cB, idB))
 		std::cout << "yes, ";
 	else {
 		std::cout << "FAIL" << std::endl;
 		return -1;
 	}
-	if (cB.agreesWith(cA))
+	if (cB.agreesWith(cA, idA))
 		std::cout << "yes." << std::endl;
 	else {
 		std::cout << "FAIL" << std::endl;
@@ -588,18 +617,18 @@ static int testCertificate()
 	}
 
 	std::cout << "[certificate] Generating two certificates that should not agree...";
-	cA = CertificateOfMembership(10000,100,1,idA.address());
-	cB = CertificateOfMembership(10101,100,1,idB.address());
+	cA = CertificateOfMembership(10000,100,1,idA);
+	cB = CertificateOfMembership(10101,100,1,idB);
 	std::cout << std::endl;
 
 	std::cout << "[certificate] A agrees with B and B with A... ";
-	if (!cA.agreesWith(cB))
+	if (!cA.agreesWith(cB, idB))
 		std::cout << "no, ";
 	else {
 		std::cout << "FAIL" << std::endl;
 		return -1;
 	}
-	if (!cB.agreesWith(cA))
+	if (!cB.agreesWith(cA, idA))
 		std::cout << "no." << std::endl;
 	else {
 		std::cout << "FAIL" << std::endl;
@@ -638,7 +667,7 @@ static int testPacket()
 
 	std::cout << "(compressed: " << complen << ", decompressed: " << a.size() << ") ";
 	if (a != b) {
-		std::cout << "FAIL (compresssion)" << std::endl;
+		std::cout << "FAIL (compression)" << std::endl;
 		return -1;
 	}
 
