@@ -38,6 +38,8 @@ set(include_dirs
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/
     ${CMAKE_CURRENT_SOURCE_DIR}/../node/
     ${CMAKE_CURRENT_SOURCE_DIR}/../ext/
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ext/prometheus-cpp-lite-1.0/core/include/
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ext/prometheus-cpp-lite-1.0/simpleapi/include/
     ${Java_INCLUDE_DIRS})
 
 if(WIN32)
