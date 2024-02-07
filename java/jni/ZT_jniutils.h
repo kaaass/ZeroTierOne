@@ -24,6 +24,7 @@
 
 #include <limits> // for numeric_limits
 #include <sys/socket.h> // for sockaddr_storage
+#include <cassert> // for assert
 
 #if defined(__ANDROID__)
 
@@ -52,18 +53,49 @@
     #define LOGE(...) fprintf(stdout, __VA_ARGS__)
 #endif
 
+class JNIEnvGuard {
+public:
+    JNIEnvGuard(JavaVM *vm, const char* tag) : vm(vm), env(NULL), needDetach(false) {
+        jint ret;
+
+        assert(vm);
+        ret = vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+
+        if (ret == JNI_EDETACHED) {
+            ret = vm->AttachCurrentThread(&env, NULL);
+            needDetach = true;
+        }
+
+        if (ret != JNI_OK) {
+            __android_log_print(ANDROID_LOG_ERROR, tag, "Error calling GetEnv: %d", ret);
+            assert(false && "Error calling GetEnv");
+        }
+    }
+
+    JNIEnv *get() {
+        return env;
+    }
+
+    ~JNIEnvGuard() {
+        if (needDetach) {
+            assert(vm);
+            vm->DetachCurrentThread();
+        }
+        env = NULL;
+    }
+
+private:
+    JavaVM *vm;
+    JNIEnv *env;
+    bool needDetach;
+};
+
 //
 // Call GetEnv and assert if there is an error
 //
 #define GETENV(env, vm) \
-    do { \
-        jint getEnvRet; \
-        assert(vm); \
-        if ((getEnvRet = vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6)) != JNI_OK) { \
-            LOGE("Error calling GetEnv: %d", getEnvRet); \
-            assert(false && "Error calling GetEnv"); \
-        } \
-    } while (false)
+    JNIEnvGuard envGuard_##__LINE__((vm), LOG_TAG); \
+    env = envGuard_##__LINE__.get()
 
 //
 // Call GetJavaVM and assert if there is an error
